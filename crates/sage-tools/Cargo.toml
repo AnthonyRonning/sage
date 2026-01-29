@@ -1,0 +1,18 @@
+[package]
+name = "sage-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+rig-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+schemars = "1.0"
+
+[dev-dependencies]
+tokio-test.workspace = true

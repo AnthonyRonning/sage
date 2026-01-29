@@ -1,0 +1,40 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Nix
+result
+.direnv/
+
+# Docker
+docker/data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Credentials (NEVER commit these)
+*.pem
+*.key
+credentials/
+secrets/
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.postgres-sage/

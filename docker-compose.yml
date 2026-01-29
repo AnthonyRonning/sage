@@ -1,0 +1,99 @@
+# Sage Docker Compose
+# Run with: docker compose up
+#
+# Prerequisites:
+# - Maple Desktop running on host (port 8089) OR maple-proxy
+# - Signal account already registered (data in ~/.local/share/signal-cli)
+#
+# First-time setup:
+#   1. Ensure signal-cli data exists at ~/.local/share/signal-cli
+#   2. Copy .env.example to .env and configure
+#   3. Run: docker compose up
+
+services:
+  # PostgreSQL with pgvector for memory storage
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: sage-postgres
+    environment:
+      POSTGRES_USER: sage
+      POSTGRES_PASSWORD: sage
+      POSTGRES_DB: sage
+    ports:
+      - "5434:5432"  # Use 5434 externally to match dev setup
+    volumes:
+      - sage-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sage -d sage"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # signal-cli daemon for Signal messaging
+  # Uses official native image with embedded libsignal
+  signal-cli:
+    image: registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest
+    container_name: sage-signal-cli
+    command: ["daemon", "--tcp", "0.0.0.0:7583", "--send-read-receipts"]
+    ports:
+      - "7583:7583"
+    volumes:
+      # Use a named volume (populated via `just signal-init`)
+      # Run `just signal-init` before first use to copy ~/.local/share/signal-cli/data into the volume
+      - signal-cli-data:/var/lib/signal-cli
+    tmpfs:
+      - /tmp:exec
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7583"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Sage V2 - Rust AI agent
+  sage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      signal-cli:
+        condition: service_healthy
+    volumes:
+      - ${SAGE_WORKSPACE:-~/.sage/workspace}:/workspace:rw
+    environment:
+      # Database
+      - DATABASE_URL=postgres://sage:sage@postgres:5432/sage
+      
+      # LLM Backend (Maple)
+      - MAPLE_API_URL=${MAPLE_API_URL:-http://host.docker.internal:8089/v1}
+      - MAPLE_API_KEY=${MAPLE_API_KEY}
+      - MAPLE_MODEL=${MAPLE_MODEL:-kimi-k2-thinking}
+      - MAPLE_EMBEDDING_MODEL=${MAPLE_EMBEDDING_MODEL:-maple/nomic-embed-text}
+      
+      # Signal (TCP mode to signal-cli container)
+      - SIGNAL_CLI_HOST=signal-cli
+      - SIGNAL_CLI_PORT=7583
+      - SIGNAL_PHONE_NUMBER=${SIGNAL_PHONE_NUMBER}
+      - SIGNAL_ALLOWED_USERS=${SIGNAL_ALLOWED_USERS}
+      
+      # Tools
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      
+      # Workspace
+      - SAGE_WORKSPACE=/workspace
+      
+      # Logging
+      - RUST_LOG=${RUST_LOG:-info}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  sage-postgres-data:
+    # Named volume for PostgreSQL data persistence
+  signal-cli-data:
+    # Named volume for signal-cli data (run `just signal-init` to populate)
