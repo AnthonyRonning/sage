@@ -285,6 +285,20 @@ impl AgentManager {
         Ok(result)
     }
     
+    /// Get signal_identifier for an agent_id (reverse lookup for scheduled tasks)
+    pub fn get_signal_identifier(&self, agent_id: Uuid) -> Result<Option<String>> {
+        let mut conn = self.db_conn.lock()
+            .map_err(|_| anyhow::anyhow!("Failed to acquire database lock"))?;
+        
+        let result: Option<String> = chat_contexts::table
+            .filter(chat_contexts::id.eq(agent_id))
+            .select(chat_contexts::signal_identifier)
+            .first(&mut *conn)
+            .optional()?;
+        
+        Ok(result)
+    }
+    
     /// Get all chat contexts
     #[allow(dead_code)]
     pub fn list_contexts(&self) -> Result<Vec<ChatContext>> {

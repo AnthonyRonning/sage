@@ -265,6 +265,17 @@ impl SignalClient {
         Ok(())
     }
 
+    /// Refresh account/prekeys to prevent silent send failures
+    /// Call this periodically (e.g., every 4-8 hours) as a health check
+    pub fn refresh_account(&self) -> Result<()> {
+        info!("Refreshing Signal account (prekey health check)...");
+        
+        self.send_request("updateAccount", json!({}))?;
+        
+        info!("Signal account refreshed successfully");
+        Ok(())
+    }
+
     /// Take the reader for the receive loop (consumes self partially)
     /// Returns a reader that can be used in run_receive_loop
     pub fn take_reader(&self) -> Result<SignalReader> {

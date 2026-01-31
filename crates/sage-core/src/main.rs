@@ -218,21 +218,56 @@ async fn main() -> Result<()> {
     let mut scheduler_rx = scheduler::spawn_scheduler(scheduler_db.clone(), 30);
     info!("Background scheduler started (polling every 30s)");
 
+    // Signal health check interval (every 4 hours)
+    // This refreshes prekeys to prevent silent send failures
+    let mut signal_health_interval = tokio::time::interval(std::time::Duration::from_secs(4 * 60 * 60));
+    signal_health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Skip the first immediate tick
+    signal_health_interval.tick().await;
+    info!("Signal health check scheduled (every 4 hours)");
+
     // Main event loop
     loop {
         tokio::select! {
+            // Periodic Signal health check (refresh prekeys)
+            _ = signal_health_interval.tick() => {
+                info!("🔄 Running Signal health check...");
+                let client = signal_client.lock().await;
+                if let Err(e) = client.refresh_account() {
+                    warn!("Signal health check failed: {} - will retry next interval", e);
+                }
+            }
             // Handle scheduled task events
             Some(event) = scheduler_rx.recv() => {
                 let task = event.task;
                 info!("⏰ Processing scheduled task: {} ({})", task.description, task.task_type.as_str());
                 
-                // For scheduled tasks, we need to find the right agent
-                // The task has an agent_id, so we look up which signal_identifier that maps to
-                // For now, we'll handle this by looking at which context the task belongs to
+                // Look up the signal_identifier for this agent_id
+                let signal_identifier = match agent_manager.get_signal_identifier(task.agent_id) {
+                    Ok(Some(id)) => id,
+                    Ok(None) => {
+                        error!("No signal_identifier found for agent_id {} - cannot deliver scheduled task", task.agent_id);
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Failed to look up signal_identifier for agent_id {}: {}", task.agent_id, e);
+                        continue;
+                    }
+                };
                 
-                // TODO: Store signal_identifier in task payload or maintain reverse lookup
-                // For now, scheduled tasks still need the old behavior
-                warn!("Scheduled task processing not yet updated for multi-agent - skipping");
+                // Handle different task types based on payload
+                match &task.payload {
+                    scheduler::TaskPayload::Message(msg_payload) => {
+                        info!("📤 Sending scheduled message to {}: {}", signal_identifier, msg_payload.message);
+                        let client = signal_client.lock().await;
+                        if let Err(e) = client.send_message(&signal_identifier, &msg_payload.message) {
+                            error!("Failed to send scheduled message: {}", e);
+                        }
+                    }
+                    scheduler::TaskPayload::ToolCall(tool_payload) => {
+                        warn!("Tool call scheduled tasks not yet implemented: {:?}", tool_payload);
+                    }
+                }
             }
             
             // Handle incoming messages
