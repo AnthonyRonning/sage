@@ -9,8 +9,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use cron::Schedule;
-use diesel::prelude::*;
 use diesel::pg::PgConnection;
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -42,12 +42,15 @@ impl TaskType {
 
 impl FromStr for TaskType {
     type Err = anyhow::Error;
-    
+
     fn from_str(s: &str) -> Result<Self> {
         match s {
             "message" => Ok(TaskType::Message),
             "tool_call" => Ok(TaskType::ToolCall),
-            _ => Err(anyhow::anyhow!("Invalid task type: {}. Must be 'message' or 'tool_call'", s)),
+            _ => Err(anyhow::anyhow!(
+                "Invalid task type: {}. Must be 'message' or 'tool_call'",
+                s
+            )),
         }
     }
 }
@@ -77,7 +80,7 @@ impl TaskStatus {
 
 impl FromStr for TaskStatus {
     type Err = anyhow::Error;
-    
+
     fn from_str(s: &str) -> Result<Self> {
         match s {
             "pending" => Ok(TaskStatus::Pending),
@@ -164,13 +167,13 @@ struct ScheduledTaskRow {
 
 impl TryFrom<ScheduledTaskRow> for ScheduledTask {
     type Error = anyhow::Error;
-    
+
     fn try_from(row: ScheduledTaskRow) -> Result<Self> {
         let task_type = TaskType::from_str(&row.task_type)?;
-        let payload: TaskPayload = serde_json::from_value(row.payload)
-            .context("Failed to parse task payload")?;
+        let payload: TaskPayload =
+            serde_json::from_value(row.payload).context("Failed to parse task payload")?;
         let status = TaskStatus::from_str(&row.status)?;
-        
+
         Ok(ScheduledTask {
             id: row.id,
             agent_id: row.agent_id,
@@ -202,16 +205,15 @@ impl SchedulerDb {
     pub fn new(conn: Arc<Mutex<PgConnection>>) -> Self {
         Self { conn }
     }
-    
+
     /// Create a new SchedulerDb with its own connection
     pub fn connect(db_url: &str) -> Result<Self> {
-        let conn = PgConnection::establish(db_url)
-            .context("Failed to connect to database")?;
+        let conn = PgConnection::establish(db_url).context("Failed to connect to database")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-    
+
     /// Create a new scheduled task
     pub fn create_task(
         &self,
@@ -223,11 +225,14 @@ impl SchedulerDb {
         timezone: String,
         description: String,
     ) -> Result<ScheduledTask> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         let id = Uuid::new_v4();
         let payload_json = serde_json::to_value(&payload)?;
-        
+
         let new_task = NewScheduledTask {
             id,
             agent_id,
@@ -239,12 +244,12 @@ impl SchedulerDb {
             status: TaskStatus::Pending.as_str().to_string(),
             description: description.clone(),
         };
-        
+
         diesel::insert_into(scheduled_tasks::table)
             .values(&new_task)
             .execute(&mut *conn)
             .context("Failed to insert scheduled task")?;
-        
+
         Ok(ScheduledTask {
             id,
             agent_id,
@@ -261,74 +266,89 @@ impl SchedulerDb {
             created_at: Utc::now(),
         })
     }
-    
+
     /// Get all due tasks (pending and next_run_at <= now)
     pub fn get_due_tasks(&self) -> Result<Vec<ScheduledTask>> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         let rows: Vec<ScheduledTaskRow> = scheduled_tasks::table
             .filter(scheduled_tasks::status.eq("pending"))
             .filter(scheduled_tasks::next_run_at.le(Utc::now()))
             .order(scheduled_tasks::next_run_at.asc())
             .load(&mut *conn)
             .context("Failed to query due tasks")?;
-        
-        rows.into_iter()
-            .map(ScheduledTask::try_from)
-            .collect()
+
+        rows.into_iter().map(ScheduledTask::try_from).collect()
     }
-    
+
     /// Get tasks by agent and optional status filter
-    pub fn get_tasks_by_agent(&self, agent_id: Uuid, status_filter: Option<&str>) -> Result<Vec<ScheduledTask>> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+    pub fn get_tasks_by_agent(
+        &self,
+        agent_id: Uuid,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<ScheduledTask>> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         let mut query = scheduled_tasks::table
             .filter(scheduled_tasks::agent_id.eq(agent_id))
             .into_boxed();
-        
+
         if let Some(status) = status_filter {
             query = query.filter(scheduled_tasks::status.eq(status));
         }
-        
+
         let rows: Vec<ScheduledTaskRow> = query
             .order(scheduled_tasks::next_run_at.asc())
             .load(&mut *conn)
             .context("Failed to query tasks")?;
-        
-        rows.into_iter()
-            .map(ScheduledTask::try_from)
-            .collect()
+
+        rows.into_iter().map(ScheduledTask::try_from).collect()
     }
-    
+
     /// Get a task by ID
     pub fn get_task(&self, task_id: Uuid) -> Result<Option<ScheduledTask>> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         let row: Option<ScheduledTaskRow> = scheduled_tasks::table
             .filter(scheduled_tasks::id.eq(task_id))
             .first(&mut *conn)
             .optional()
             .context("Failed to query task")?;
-        
+
         row.map(ScheduledTask::try_from).transpose()
     }
-    
+
     /// Mark a task as running
     pub fn mark_running(&self, task_id: Uuid) -> Result<()> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         diesel::update(scheduled_tasks::table.filter(scheduled_tasks::id.eq(task_id)))
             .set(scheduled_tasks::status.eq("running"))
             .execute(&mut *conn)
             .context("Failed to mark task as running")?;
-        
+
         Ok(())
     }
-    
+
     /// Mark a task as completed (for one-off tasks)
     pub fn mark_completed(&self, task_id: Uuid) -> Result<()> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         diesel::update(scheduled_tasks::table.filter(scheduled_tasks::id.eq(task_id)))
             .set((
                 scheduled_tasks::status.eq("completed"),
@@ -337,14 +357,17 @@ impl SchedulerDb {
             ))
             .execute(&mut *conn)
             .context("Failed to mark task as completed")?;
-        
+
         Ok(())
     }
-    
+
     /// Update a recurring task with next run time
     pub fn update_next_run(&self, task_id: Uuid, next_run_at: DateTime<Utc>) -> Result<()> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         diesel::update(scheduled_tasks::table.filter(scheduled_tasks::id.eq(task_id)))
             .set((
                 scheduled_tasks::status.eq("pending"),
@@ -354,14 +377,17 @@ impl SchedulerDb {
             ))
             .execute(&mut *conn)
             .context("Failed to update next run time")?;
-        
+
         Ok(())
     }
-    
+
     /// Mark a task as failed
     pub fn mark_failed(&self, task_id: Uuid, error: &str) -> Result<()> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         diesel::update(scheduled_tasks::table.filter(scheduled_tasks::id.eq(task_id)))
             .set((
                 scheduled_tasks::status.eq("failed"),
@@ -371,23 +397,26 @@ impl SchedulerDb {
             ))
             .execute(&mut *conn)
             .context("Failed to mark task as failed")?;
-        
+
         Ok(())
     }
-    
+
     /// Cancel a task
     pub fn cancel_task(&self, task_id: Uuid) -> Result<bool> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         let updated = diesel::update(
             scheduled_tasks::table
                 .filter(scheduled_tasks::id.eq(task_id))
-                .filter(scheduled_tasks::status.eq("pending"))
+                .filter(scheduled_tasks::status.eq("pending")),
         )
-            .set(scheduled_tasks::status.eq("cancelled"))
-            .execute(&mut *conn)
-            .context("Failed to cancel task")?;
-        
+        .set(scheduled_tasks::status.eq("cancelled"))
+        .execute(&mut *conn)
+        .context("Failed to cancel task")?;
+
         Ok(updated > 0)
     }
 }
@@ -405,16 +434,19 @@ pub fn parse_cron(expression: &str) -> Result<Schedule> {
 /// Calculate the next run time from a cron expression in a specific timezone
 pub fn next_cron_time(cron_expr: &str, timezone: &str) -> Result<DateTime<Utc>> {
     let schedule = parse_cron(cron_expr)?;
-    let tz: Tz = timezone.parse()
+    let tz: Tz = timezone
+        .parse()
         .map_err(|_| anyhow::anyhow!("Invalid timezone: {}", timezone))?;
-    
+
     // Get current time in the specified timezone
     let now_in_tz = Utc::now().with_timezone(&tz);
-    
+
     // Find next occurrence
-    let next = schedule.after(&now_in_tz).next()
+    let next = schedule
+        .after(&now_in_tz)
+        .next()
         .ok_or_else(|| anyhow::anyhow!("No future occurrences for cron expression"))?;
-    
+
     // Convert back to UTC
     Ok(next.with_timezone(&Utc))
 }
@@ -425,17 +457,17 @@ pub fn parse_datetime(s: &str) -> Result<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Ok(dt.with_timezone(&Utc));
     }
-    
+
     // Try parsing as naive datetime and assume UTC
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
         return Ok(dt.and_utc());
     }
-    
+
     // Try other common formats
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
         return Ok(dt.and_utc());
     }
-    
+
     Err(anyhow::anyhow!(
         "Invalid datetime format: '{}'. Use ISO 8601 format (e.g., 2026-01-26T15:30:00Z or 2026-01-26T15:30:00-06:00)",
         s
@@ -467,30 +499,31 @@ pub fn spawn_scheduler(
     poll_interval_secs: u64,
 ) -> mpsc::Receiver<ScheduledTaskEvent> {
     let (tx, rx) = mpsc::channel::<ScheduledTaskEvent>(100);
-    
+
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(
-            tokio::time::Duration::from_secs(poll_interval_secs)
-        );
-        
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(poll_interval_secs));
+
         loop {
             interval.tick().await;
-            
+
             // Get due tasks
             match scheduler_db.get_due_tasks() {
                 Ok(tasks) => {
                     for task in tasks {
                         tracing::debug!("Found due task: {} ({})", task.description, task.id);
-                        
+
                         // Mark as running
                         if let Err(e) = scheduler_db.mark_running(task.id) {
                             tracing::error!("Failed to mark task {} as running: {}", task.id, e);
                             continue;
                         }
-                        
+
                         // Send to main loop for processing
                         if tx.send(ScheduledTaskEvent { task }).await.is_err() {
-                            tracing::warn!("Scheduler channel closed, stopping background scheduler");
+                            tracing::warn!(
+                                "Scheduler channel closed, stopping background scheduler"
+                            );
                             return;
                         }
                     }
@@ -501,7 +534,7 @@ pub fn spawn_scheduler(
             }
         }
     });
-    
+
     rx
 }
 
@@ -534,32 +567,32 @@ pub fn fail_task(scheduler_db: &SchedulerDb, task: &ScheduledTask, error: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_cron() {
         // Valid expressions
         assert!(parse_cron("0 9 * * MON-FRI").is_ok());
         assert!(parse_cron("*/15 * * * *").is_ok());
         assert!(parse_cron("0 0 1 * *").is_ok());
-        
+
         // Invalid expressions
         assert!(parse_cron("invalid").is_err());
         assert!(parse_cron("0 99 * * *").is_err());
     }
-    
+
     #[test]
     fn test_parse_datetime() {
         // ISO 8601 with timezone
         assert!(parse_datetime("2026-01-26T15:30:00Z").is_ok());
         assert!(parse_datetime("2026-01-26T15:30:00-06:00").is_ok());
-        
+
         // Without timezone (assumes UTC)
         assert!(parse_datetime("2026-01-26T15:30:00").is_ok());
-        
+
         // Invalid
         assert!(parse_datetime("not a date").is_err());
     }
-    
+
     #[test]
     fn test_is_cron_expression() {
         assert!(is_cron_expression("0 9 * * MON-FRI"));

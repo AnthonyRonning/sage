@@ -54,9 +54,9 @@ impl SignalClient {
     pub fn connect_tcp(account: &str, host: &str, port: u16) -> Result<Self> {
         info!("Connecting to signal-cli daemon at {}:{}", host, port);
 
-        let stream = TcpStream::connect((host, port))
-            .context("Failed to connect to signal-cli daemon")?;
-        
+        let stream =
+            TcpStream::connect((host, port)).context("Failed to connect to signal-cli daemon")?;
+
         let reader = BufReader::new(stream.try_clone()?);
         let writer = BufWriter::new(stream);
 
@@ -70,24 +70,31 @@ impl SignalClient {
             tcp_port: port,
         })
     }
-    
+
     /// Reconnect TCP connection (for recovery from broken pipe)
     pub fn reconnect(&self) -> Result<()> {
-        let host = self.tcp_host.as_ref()
+        let host = self
+            .tcp_host
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Cannot reconnect: not in TCP mode"))?;
-        
-        warn!("Reconnecting to signal-cli daemon at {}:{}...", host, self.tcp_port);
-        
+
+        warn!(
+            "Reconnecting to signal-cli daemon at {}:{}...",
+            host, self.tcp_port
+        );
+
         let stream = TcpStream::connect((host.as_str(), self.tcp_port))
             .context("Failed to reconnect to signal-cli daemon")?;
-        
+
         let reader = BufReader::new(stream.try_clone()?);
         let writer = BufWriter::new(stream);
-        
-        let mut mode = self.mode.lock()
+
+        let mut mode = self
+            .mode
+            .lock()
             .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         *mode = ConnectionMode::Tcp { reader, writer };
-        
+
         info!("Reconnected to signal-cli daemon successfully");
         Ok(())
     }
@@ -131,7 +138,10 @@ impl SignalClient {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         // Add account parameter for TCP mode
-        let mut mode = self.mode.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        let mut mode = self
+            .mode
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         if matches!(*mode, ConnectionMode::Tcp { .. }) {
             if let Value::Object(ref mut map) = params {
                 map.insert("account".to_string(), json!(self.account));
@@ -173,11 +183,11 @@ impl SignalClient {
             }
             end
         };
-        
+
         // Retry logic: try up to 3 times with reconnection on failure
         let max_retries = 3;
         let mut last_error = None;
-        
+
         for attempt in 1..=max_retries {
             let result = self.send_request(
                 "send",
@@ -186,7 +196,7 @@ impl SignalClient {
                     "message": message
                 }),
             );
-            
+
             match result {
                 Ok(res) => {
                     let request_id = res.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -205,12 +215,12 @@ impl SignalClient {
                         attempt, max_retries, error_str
                     );
                     last_error = Some(e);
-                    
+
                     // If it's a broken pipe or connection error, try to reconnect
-                    if error_str.contains("Broken pipe") 
+                    if error_str.contains("Broken pipe")
                         || error_str.contains("Connection reset")
                         || error_str.contains("os error 32")
-                        || error_str.contains("os error 104") 
+                        || error_str.contains("os error 104")
                     {
                         if attempt < max_retries {
                             if let Err(reconnect_err) = self.reconnect() {
@@ -226,8 +236,9 @@ impl SignalClient {
                 }
             }
         }
-        
-        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Send failed after {} retries", max_retries)))
+
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("Send failed after {} retries", max_retries)))
     }
 
     /// Send typing indicator to a recipient
@@ -269,9 +280,9 @@ impl SignalClient {
     /// Call this periodically (e.g., every 4-8 hours) as a health check
     pub fn refresh_account(&self) -> Result<()> {
         info!("Refreshing Signal account (prekey health check)...");
-        
+
         self.send_request("updateAccount", json!({}))?;
-        
+
         info!("Signal account refreshed successfully");
         Ok(())
     }
@@ -279,17 +290,21 @@ impl SignalClient {
     /// Take the reader for the receive loop (consumes self partially)
     /// Returns a reader that can be used in run_receive_loop
     pub fn take_reader(&self) -> Result<SignalReader> {
-        let mut mode = self.mode.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        
+        let mut mode = self
+            .mode
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
         match &mut *mode {
             ConnectionMode::Tcp { .. } => {
                 // For TCP, we need to clone the underlying stream
                 // This is a limitation - we'll need a different approach
-                Err(anyhow::anyhow!("TCP reader extraction not yet supported - use run_receive_loop_tcp"))
+                Err(anyhow::anyhow!(
+                    "TCP reader extraction not yet supported - use run_receive_loop_tcp"
+                ))
             }
             ConnectionMode::Subprocess { process, .. } => {
-                let stdout = process.stdout.take()
-                    .context("stdout already taken")?;
+                let stdout = process.stdout.take().context("stdout already taken")?;
                 Ok(SignalReader::Subprocess(BufReader::new(stdout)))
             }
         }
@@ -305,19 +320,17 @@ impl SignalClient {
 
         match &mut *mode {
             ConnectionMode::Tcp { .. } => true, // Assume TCP is always "running"
-            ConnectionMode::Subprocess { process, .. } => {
-                match process.try_wait() {
-                    Ok(None) => true,
-                    Ok(Some(status)) => {
-                        warn!("signal-cli exited with status: {}", status);
-                        false
-                    }
-                    Err(e) => {
-                        error!("Error checking signal-cli status: {}", e);
-                        false
-                    }
+            ConnectionMode::Subprocess { process, .. } => match process.try_wait() {
+                Ok(None) => true,
+                Ok(Some(status)) => {
+                    warn!("signal-cli exited with status: {}", status);
+                    false
                 }
-            }
+                Err(e) => {
+                    error!("Error checking signal-cli status: {}", e);
+                    false
+                }
+            },
         }
     }
 }

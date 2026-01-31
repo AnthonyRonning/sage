@@ -6,7 +6,7 @@
 //! - GEPA-compatible instruction optimization
 
 use anyhow::Result;
-use dspy_rs::{configure, BamlType, ChatAdapter, LM, Predict};
+use dspy_rs::{configure, BamlType, ChatAdapter, Predict, LM};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -35,7 +35,9 @@ pub struct AgentResponse {
     #[input(desc = "The input to respond to - either a user message or tool execution result")]
     pub input: String,
 
-    #[input(desc = "Compacted summary of very old messages (only present for long conversations). Ignore if empty.")]
+    #[input(
+        desc = "Compacted summary of very old messages (only present for long conversations). Ignore if empty."
+    )]
     pub previous_context_summary: String,
 
     #[input(desc = "Recent conversation history including your messages and tool results")]
@@ -50,12 +52,14 @@ pub struct AgentResponse {
     #[output(desc = "Array of messages to send to the user (can be empty)")]
     pub messages: Vec<String>,
 
-    #[output(desc = "Array of tool calls to execute (can be empty, or [{\"name\": \"done\", \"args\": {}}] if nothing to do)")]
+    #[output(
+        desc = "Array of tool calls to execute (can be empty, or [{\"name\": \"done\", \"args\": {}}] if nothing to do)"
+    )]
     pub tool_calls: Vec<ToolCall>,
 }
 
 /// Correction agent signature for fixing malformed responses
-/// 
+///
 /// This agent takes a malformed response and reshapes it into the correct format.
 /// It should preserve the intent/content of the original response, not generate new content.
 #[derive(dspy_rs::Signature, Clone, Debug)]
@@ -275,7 +279,7 @@ pub struct ExecutedTool {
 pub struct StepResult {
     pub messages: Vec<String>,
     pub tool_calls: Vec<ToolCall>,
-    pub executed_tools: Vec<ExecutedTool>,  // Tool calls with their results for storage
+    pub executed_tools: Vec<ExecutedTool>, // Tool calls with their results for storage
     pub done: bool,
 }
 
@@ -327,7 +331,7 @@ impl SageAgent {
             max_steps: 10,
         }
     }
-    
+
     /// Store a message in memory (for persistence)
     pub async fn store_message(&self, user_id: &str, role: &str, content: &str) -> Result<Uuid> {
         if let Some(memory) = &self.memory {
@@ -336,7 +340,7 @@ impl SageAgent {
             Err(anyhow::anyhow!("No memory system configured"))
         }
     }
-    
+
     /// Store a message WITHOUT embedding (fast, synchronous)
     /// Returns message ID for later embedding update
     pub fn store_message_sync(&self, user_id: &str, role: &str, content: &str) -> Result<Uuid> {
@@ -346,7 +350,7 @@ impl SageAgent {
             Err(anyhow::anyhow!("No memory system configured"))
         }
     }
-    
+
     /// Update embedding for a message (call in background)
     pub async fn update_message_embedding(&self, message_id: Uuid, content: &str) -> Result<()> {
         if let Some(memory) = &self.memory {
@@ -355,16 +359,23 @@ impl SageAgent {
             Err(anyhow::anyhow!("No memory system configured"))
         }
     }
-    
+
     /// Store a tool call and its result in memory
-    pub async fn store_tool_message(&self, user_id: &str, tool_call: &ToolCall, result: &ToolResult) -> Result<Uuid> {
+    pub async fn store_tool_message(
+        &self,
+        user_id: &str,
+        tool_call: &ToolCall,
+        result: &ToolResult,
+    ) -> Result<Uuid> {
         if let Some(memory) = &self.memory {
             // Format: tool_name(args) → result
-            let args_str = tool_call.args.iter()
+            let args_str = tool_call
+                .args
+                .iter()
                 .map(|(k, v)| format!("{}=\"{}\"", k, v.chars().take(500).collect::<String>()))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             // Store full result up to 10k chars (truncate to 2k when displaying in context)
             let result_preview = if result.success {
                 if result.output.len() > 10000 {
@@ -380,14 +391,9 @@ impl SageAgent {
             } else {
                 format!("Error: {}", result.error.as_deref().unwrap_or("Unknown"))
             };
-            
-            let content = format!(
-                "{}({}) → {}",
-                tool_call.name,
-                args_str,
-                result_preview
-            );
-            
+
+            let content = format!("{}({}) → {}", tool_call.name, args_str, result_preview);
+
             memory.store_message(user_id, "tool", &content).await
         } else {
             Err(anyhow::anyhow!("No memory system configured"))
@@ -401,7 +407,7 @@ impl SageAgent {
             .api_key(api_key.to_string())
             .model(model.to_string())
             .temperature(0.7)
-            .max_tokens(32768)  // High limit for thinking models (Kimi K2 uses tokens for reasoning)
+            .max_tokens(32768) // High limit for thinking models (Kimi K2 uses tokens for reasoning)
             .build()
             .await?;
 
@@ -415,7 +421,7 @@ impl SageAgent {
         let mut context = String::new();
         let mut previous_summary = String::new();
         let mut is_first_time_user = false;
-        
+
         // Add current time at the top
         // Use user's preferred timezone if set, otherwise UTC
         let now = chrono::Utc::now();
@@ -439,7 +445,7 @@ impl SageAgent {
                 now.format("%m/%d/%Y %H:%M:%S (%A)")
             ));
         }
-        
+
         // Include memory blocks if available
         if let Some(memory) = &self.memory {
             let memory_xml = memory.compile();
@@ -448,20 +454,20 @@ impl SageAgent {
                 context.push_str("\n\n");
             }
         }
-        
+
         // Load conversation history with smart context management
         let mut has_history = false;
         if let Some(memory) = &self.memory {
             // Get user's timezone preference for formatting
             let user_tz = memory.get_timezone().ok().flatten();
-            
+
             // Use new context management: get summary + messages
             if let Ok((summary, messages)) = memory.get_context_messages() {
                 // Get previous summary content (empty if none)
                 if let Some(s) = summary {
                     previous_summary = s.content;
                 }
-                
+
                 // Add messages to context
                 if !messages.is_empty() {
                     has_history = true;
@@ -490,7 +496,7 @@ impl SageAgent {
                 }
             }
         }
-        
+
         // Add any tool results from current request cycle (no timestamp, they're happening now)
         for msg in &self.current_tool_results {
             if !has_history {
@@ -499,11 +505,11 @@ impl SageAgent {
             }
             context.push_str(&format!("[{}]: {}\n", msg.role, msg.content));
         }
-        
+
         if !has_history {
             context.push_str("No previous conversation.");
         }
-        
+
         // First-time user = only 1 message (the current one) and no summary
         if let Some(memory) = &self.memory {
             if let Ok((summary, messages)) = memory.get_context_messages() {
@@ -512,7 +518,7 @@ impl SageAgent {
                 }
             }
         }
-        
+
         (previous_summary, context, is_first_time_user)
     }
 
@@ -522,12 +528,14 @@ impl SageAgent {
         let args_str = if tool_call.args.is_empty() {
             String::new()
         } else {
-            let pairs: Vec<String> = tool_call.args.iter()
+            let pairs: Vec<String> = tool_call
+                .args
+                .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
                 .collect();
             format!("\nArgs: {}", pairs.join(", "))
         };
-        
+
         let result_text = format!(
             "[Tool Result: {}]{}\nStatus: {}\nOutput: {}",
             tool_call.name,
@@ -539,9 +547,10 @@ impl SageAgent {
                 result.error.as_deref().unwrap_or("Unknown error")
             }
         );
-        self.current_tool_results.push(Message::tool_result(result_text));
+        self.current_tool_results
+            .push(Message::tool_result(result_text));
     }
-    
+
     /// Clear tool results from current request cycle (call at start of new request)
     pub fn clear_tool_results(&mut self) {
         self.current_tool_results.clear();
@@ -549,8 +558,8 @@ impl SageAgent {
     }
 
     /// Attempt to correct a malformed LLM response using the correction agent
-    /// 
-    /// Takes the raw LLM output directly and asks a specialized correction agent 
+    ///
+    /// Takes the raw LLM output directly and asks a specialized correction agent
     /// to reshape it into the proper format.
     async fn attempt_correction(
         &self,
@@ -562,32 +571,35 @@ impl SageAgent {
         if raw_response.is_empty() {
             return Err(anyhow::anyhow!("No raw response available for correction"));
         }
-        
+
         tracing::info!("=== CORRECTION ATTEMPT ===");
         tracing::info!("Error: {}", error_message);
         tracing::info!("Raw response length: {} chars", raw_response.len());
         tracing::info!("Raw response:\n{}", raw_response);
-        
+
         // Create the correction predictor
         let correction_predictor = Predict::<CorrectionResponse>::builder()
             .instruction(CORRECTION_INSTRUCTION)
             .build();
-        
+
         let correction_input = CorrectionResponseInput {
             original_input: original_input.to_string(),
             malformed_response: raw_response.to_string(),
             error_message: error_message.to_string(),
             available_tools: available_tools.to_string(),
         };
-        
+
         // Call correction agent (no retry on correction - avoid infinite loops)
         let corrected = correction_predictor.call(correction_input).await?;
-        
+
         tracing::info!("=== CORRECTION RESULT ===");
         tracing::info!("Corrected messages: {:?}", corrected.messages);
         tracing::info!("Corrected tool_calls: {:?}", corrected.tool_calls);
-        tracing::info!("Correction reasoning: {}", &corrected.reasoning[..corrected.reasoning.len().min(200)]);
-        
+        tracing::info!(
+            "Correction reasoning: {}",
+            &corrected.reasoning[..corrected.reasoning.len().min(200)]
+        );
+
         // Convert CorrectionResponse to AgentResponse
         Ok(AgentResponse {
             input: original_input.to_string(),
@@ -616,8 +628,9 @@ impl SageAgent {
             .build();
 
         // Build typed input - loads history from database with smart context management
-        let (previous_context_summary, conversation_context, is_first_time_user) = self.build_context(user_message);
-        
+        let (previous_context_summary, conversation_context, is_first_time_user) =
+            self.build_context(user_message);
+
         // Input is either the user message (first step) or ALL tool results from this cycle
         let input_content = if is_first_step {
             // Special welcome message for first-time users
@@ -634,21 +647,26 @@ impl SageAgent {
             }
         } else {
             // Collect ALL tool results from current cycle
-            let tool_results: Vec<&str> = self.current_tool_results.iter()
+            let tool_results: Vec<&str> = self
+                .current_tool_results
+                .iter()
                 .filter(|m| m.role == "tool")
                 .map(|m| m.content.as_str())
                 .collect();
-            
+
             if tool_results.is_empty() {
                 user_message.to_string()
             } else {
                 // Build summary of what was already sent this turn, including the actual messages
-                let already_sent = if let Some((sent_messages, tool_names)) = &self.previous_step_summary {
+                let already_sent = if let Some((sent_messages, tool_names)) =
+                    &self.previous_step_summary
+                {
                     let tools_str = tool_names.join(", ");
                     let msgs_preview = if sent_messages.is_empty() {
                         String::new()
                     } else {
-                        let msgs_text = sent_messages.iter()
+                        let msgs_text = sent_messages
+                            .iter()
                             .enumerate()
                             .map(|(i, m)| format!("  {}. \"{}\"", i + 1, m))
                             .collect::<Vec<_>>()
@@ -660,7 +678,7 @@ impl SageAgent {
                 } else {
                     String::new()
                 };
-                
+
                 let tool_result_instructions = r#"
 
 === TOOL RESULT PROCESSING MODE ===
@@ -677,32 +695,43 @@ RULES:
 SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If no → call 'done'"#;
 
                 let result = if tool_results.len() == 1 {
-                    format!("{}=== TOOL RESULT ===\n{}\n=== END TOOL RESULT ==={}", 
-                        already_sent, tool_results[0], tool_result_instructions)
+                    format!(
+                        "{}=== TOOL RESULT ===\n{}\n=== END TOOL RESULT ==={}",
+                        already_sent, tool_results[0], tool_result_instructions
+                    )
                 } else {
-                    let results_text = tool_results.iter()
+                    let results_text = tool_results
+                        .iter()
                         .enumerate()
                         .map(|(i, r)| format!("--- Tool {} ---\n{}", i + 1, r))
                         .collect::<Vec<_>>()
                         .join("\n\n");
-                    format!("{}=== TOOL RESULTS ({} tools) ===\n{}\n=== END TOOL RESULTS ==={}", 
-                        already_sent, tool_results.len(), results_text, tool_result_instructions)
+                    format!(
+                        "{}=== TOOL RESULTS ({} tools) ===\n{}\n=== END TOOL RESULTS ==={}",
+                        already_sent,
+                        tool_results.len(),
+                        results_text,
+                        tool_result_instructions
+                    )
                 };
-                
+
                 // Clear tool results after presenting them - they've been shown to the LLM
                 // New tool calls this step will add fresh results
                 self.current_tool_results.clear();
-                
+
                 result
             }
         };
-        
+
         tracing::info!("=== LLM REQUEST ===");
         tracing::info!("Tool results in cycle: {}", self.current_tool_results.len());
-        tracing::info!("Has previous context summary: {}", !previous_context_summary.is_empty());
+        tracing::info!(
+            "Has previous context summary: {}",
+            !previous_context_summary.is_empty()
+        );
         tracing::info!("Input: {}", input_content);
         tracing::info!("Conversation context:\n{}", conversation_context);
-        
+
         let available_tools = self.tools.generate_description();
         let input = AgentResponseInput {
             input: input_content.clone(),
@@ -716,20 +745,30 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("LLM call failed, attempting correction: {:?}", e);
-                
+
                 // Extract raw_response directly from PredictError::Parse
                 let (raw_response, error_message) = match &e {
-                    dspy_rs::PredictError::Parse { raw_response, source, .. } => {
-                        (raw_response.clone(), format!("Parse error: {}", source))
-                    }
+                    dspy_rs::PredictError::Parse {
+                        raw_response,
+                        source,
+                        ..
+                    } => (raw_response.clone(), format!("Parse error: {}", source)),
                     other => {
                         tracing::error!("Non-parse error, cannot correct: {:?}", other);
                         return Err(anyhow::anyhow!("LLM error: {}", other));
                     }
                 };
-                
+
                 // Try to correct the malformed response
-                match self.attempt_correction(&input_content, &available_tools, &raw_response, &error_message).await {
+                match self
+                    .attempt_correction(
+                        &input_content,
+                        &available_tools,
+                        &raw_response,
+                        &error_message,
+                    )
+                    .await
+                {
                     Ok(corrected) => corrected,
                     Err(correction_err) => {
                         tracing::error!("Correction also failed: {:?}", correction_err);
@@ -742,18 +781,26 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
         tracing::info!("=== LLM RESPONSE ===");
         tracing::info!("Messages (raw): {:?}", response.messages);
         tracing::info!("Tool calls: {:?}", response.tool_calls);
-        tracing::info!("Reasoning: {}", &response.reasoning[..response.reasoning.len().min(200)]);
+        tracing::info!(
+            "Reasoning: {}",
+            &response.reasoning[..response.reasoning.len().min(200)]
+        );
 
         // Unwrap nested JSON arrays and collect non-empty messages
         // Sometimes the LLM double-encodes: ["[\"msg1\", \"msg2\"]"] instead of ["msg1", "msg2"]
-        let messages: Vec<String> = response.messages.iter()
+        let messages: Vec<String> = response
+            .messages
+            .iter()
             .flat_map(|m| {
                 let trimmed = m.trim();
                 // Check if this message is itself a JSON array
                 if trimmed.starts_with('[') && trimmed.ends_with(']') {
                     // Try to parse as JSON array of strings
                     if let Ok(inner_messages) = serde_json::from_str::<Vec<String>>(trimmed) {
-                        tracing::debug!("Unwrapped nested JSON array with {} messages", inner_messages.len());
+                        tracing::debug!(
+                            "Unwrapped nested JSON array with {} messages",
+                            inner_messages.len()
+                        );
                         return inner_messages;
                     }
                 }
@@ -762,15 +809,19 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
             })
             .filter(|m| !m.is_empty())
             .collect();
-        
+
         tracing::info!("Messages (processed): {:?}", messages);
 
         // Execute tools and collect results for storage
         let mut executed_tools = Vec::new();
-        
+
         for tool_call in &response.tool_calls {
-            tracing::info!("Executing tool: {} with args: {:?}", tool_call.name, tool_call.args);
-            
+            tracing::info!(
+                "Executing tool: {} with args: {:?}",
+                tool_call.name,
+                tool_call.args
+            );
+
             let result = if let Some(tool) = self.tools.get(&tool_call.name) {
                 match tool.execute(&tool_call.args).await {
                     Ok(result) => {
@@ -786,10 +837,10 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
                 tracing::warn!("Unknown tool: {}", tool_call.name);
                 ToolResult::error(format!("Unknown tool: {}", tool_call.name))
             };
-            
+
             // Inject into current request cycle (for multi-step reasoning)
             self.inject_tool_result(tool_call, &result);
-            
+
             // Collect for storage (skip "done" tool - it's just a no-op signal)
             if tool_call.name != "done" {
                 executed_tools.push(ExecutedTool {
@@ -800,13 +851,15 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
         }
 
         // Done if no tool calls, OR if the only tool call is "done"
-        let done = response.tool_calls.is_empty() 
+        let done = response.tool_calls.is_empty()
             || (response.tool_calls.len() == 1 && response.tool_calls[0].name == "done");
 
         // Track what we sent this step for next iteration's context
         // This helps the model know what it already said when it sees tool results
         if !messages.is_empty() || !response.tool_calls.is_empty() {
-            let tool_names: Vec<String> = response.tool_calls.iter()
+            let tool_names: Vec<String> = response
+                .tool_calls
+                .iter()
                 .map(|tc| tc.name.clone())
                 .collect();
             self.previous_step_summary = Some((messages.clone(), tool_names));
@@ -824,12 +877,12 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
     /// This allows the caller to send messages immediately between tool calls
     pub async fn process_message(&mut self, user_message: &str) -> Result<Vec<String>> {
         let mut all_messages = Vec::new();
-        
+
         for step_num in 0..self.max_steps {
             let result = self.step(user_message, step_num == 0).await?;
-            
+
             all_messages.extend(result.messages);
-            
+
             if result.done {
                 break;
             }
@@ -843,7 +896,6 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
 
         Ok(all_messages)
     }
-
 }
 
 #[cfg(test)]

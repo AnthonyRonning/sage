@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 
 //! Sage Tools - capabilities that Sage can use
-//! 
+//!
 //! Tools are organized by category:
 //! - brave: Brave Search API client
 //! - web_search: Web search tool using Brave

@@ -37,14 +37,10 @@ impl ArchivalSearchResult {
         } else {
             format!(" [tags: {}]", self.passage.tags.join(", "))
         };
-        
+
         format!(
             "[{}] ({}, score: {:.2}){}\n{}",
-            timestamp,
-            time_ago,
-            self.relevance_score,
-            tags,
-            self.passage.content
+            timestamp, time_ago, self.relevance_score, tags, self.passage.content
         )
     }
 }
@@ -66,21 +62,22 @@ impl ArchivalManager {
             embedding,
         }
     }
-    
+
     /// Get the total number of passages
     pub fn passage_count(&self) -> usize {
-        self.db.passages()
+        self.db
+            .passages()
             .count_passages(&self.agent_id.to_string())
             .unwrap_or(0) as usize
     }
-    
+
     /// Insert a new passage into archival memory with embedding
     pub async fn insert(&self, content: &str, tags: Option<Vec<String>>) -> Result<Uuid> {
         // Generate embedding
         let embedding = self.embedding.embed(content).await?;
-        
+
         let tags = tags.unwrap_or_default();
-        
+
         // Store in database with embedding
         let id = self.db.passages().insert_passage_with_embedding(
             &self.agent_id.to_string(),
@@ -88,11 +85,11 @@ impl ArchivalManager {
             &embedding,
             &tags,
         )?;
-        
+
         tracing::debug!("Stored passage {} with embedding in archival memory", id);
         Ok(id)
     }
-    
+
     /// Search archival memory by semantic similarity
     pub async fn search(
         &self,
@@ -102,7 +99,7 @@ impl ArchivalManager {
     ) -> Result<Vec<ArchivalSearchResult>> {
         // Generate query embedding
         let query_embedding = self.embedding.embed(query).await?;
-        
+
         // Search database with pgvector
         let results = self.db.passages().search_passages_by_embedding(
             &self.agent_id.to_string(),
@@ -110,27 +107,30 @@ impl ArchivalManager {
             top_k as i64,
             tags_filter.as_deref(),
         )?;
-        
+
         // Convert to ArchivalSearchResult
-        Ok(results.into_iter().map(|(row, distance)| {
-            ArchivalSearchResult {
-                passage: Passage {
-                    id: row.id,
-                    agent_id: self.agent_id,
-                    content: row.content,
-                    tags: row.tags,
-                    created_at: row.created_at,
-                },
-                relevance_score: 1.0 - distance as f32, // Convert distance to similarity
-            }
-        }).collect())
+        Ok(results
+            .into_iter()
+            .map(|(row, distance)| {
+                ArchivalSearchResult {
+                    passage: Passage {
+                        id: row.id,
+                        agent_id: self.agent_id,
+                        content: row.content,
+                        tags: row.tags,
+                        created_at: row.created_at,
+                    },
+                    relevance_score: 1.0 - distance as f32, // Convert distance to similarity
+                }
+            })
+            .collect())
     }
 }
 
 /// Format a duration as human-readable "time ago"
 fn format_time_ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(then);
-    
+
     if duration.num_days() > 0 {
         format!("{}d ago", duration.num_days())
     } else if duration.num_hours() > 0 {

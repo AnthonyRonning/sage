@@ -1,5 +1,5 @@
 //! Filesystem tools for Sage
-//! 
+//!
 //! Allows Sage to read, write, and manage files within its workspace.
 
 use crate::ToolResult;
@@ -16,7 +16,11 @@ pub async fn read_file(path: &Path) -> ToolResult {
 /// Write contents to a file
 pub async fn write_file(path: &Path, contents: &str) -> ToolResult {
     match tokio::fs::write(path, contents).await {
-        Ok(()) => ToolResult::success(format!("Wrote {} bytes to {}", contents.len(), path.display())),
+        Ok(()) => ToolResult::success(format!(
+            "Wrote {} bytes to {}",
+            contents.len(),
+            path.display()
+        )),
         Err(e) => ToolResult::error(format!("Failed to write file: {}", e)),
     }
 }

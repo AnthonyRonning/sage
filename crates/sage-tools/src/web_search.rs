@@ -56,12 +56,12 @@ impl Tool for WebSearch {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         use crate::brave::SearchOptions;
-        
+
         let options = SearchOptions {
             count: Some(5),
             ..Default::default()
         };
-        
+
         let response = self
             .client
             .search(&args.query, Some(options))

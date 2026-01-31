@@ -28,10 +28,11 @@ impl EmbeddingService {
             client: reqwest::Client::new(),
         }
     }
-    
+
     /// Generate an embedding for a single text
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/embeddings", self.api_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&serde_json::json!({
@@ -41,7 +42,7 @@ impl EmbeddingService {
             }))
             .send()
             .await;
-        
+
         match response {
             Ok(resp) => {
                 if resp.status().is_success() {
@@ -51,11 +52,15 @@ impl EmbeddingService {
                             .iter()
                             .filter_map(|v| v.as_f64().map(|f| f as f32))
                             .collect();
-                        
+
                         if vec.len() == EMBEDDING_DIM {
                             return Ok(vec);
                         }
-                        warn!("Unexpected embedding dimension: {} (expected {})", vec.len(), EMBEDDING_DIM);
+                        warn!(
+                            "Unexpected embedding dimension: {} (expected {})",
+                            vec.len(),
+                            EMBEDDING_DIM
+                        );
                     }
                 }
                 warn!("Embedding API returned non-success status");
@@ -67,14 +72,15 @@ impl EmbeddingService {
             }
         }
     }
-    
+
     /// Generate embeddings for multiple texts (batched)
     pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(format!("{}/embeddings", self.api_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&serde_json::json!({
@@ -84,7 +90,7 @@ impl EmbeddingService {
             }))
             .send()
             .await;
-        
+
         match response {
             Ok(resp) => {
                 if resp.status().is_success() {
@@ -100,7 +106,7 @@ impl EmbeddingService {
                                 })
                             })
                             .collect();
-                        
+
                         if embeddings.len() == texts.len() {
                             return Ok(embeddings);
                         }
@@ -125,7 +131,7 @@ fn zero_embedding() -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_zero_embedding() {
         let emb = zero_embedding();

@@ -11,16 +11,16 @@ mod agent_manager;
 mod config;
 mod memory;
 mod sage_agent;
-mod schema;
 mod scheduler;
 mod scheduler_tools;
+mod schema;
 mod shell_tool;
 mod signal;
 mod storage;
 
 use agent_manager::{AgentManager, ContextType};
 use sage_agent::{SageAgent, Tool, ToolResult};
-use signal::{IncomingMessage, SignalClient, run_receive_loop, run_receive_loop_tcp};
+use signal::{run_receive_loop, run_receive_loop_tcp, IncomingMessage, SignalClient};
 
 /// Done tool - signals the agent is finished and doesn't need to send another message
 pub struct DoneTool;
@@ -39,7 +39,10 @@ impl Tool for DoneTool {
         r#"{}"#
     }
 
-    async fn execute(&self, _args: &std::collections::HashMap<String, String>) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: &std::collections::HashMap<String, String>,
+    ) -> Result<ToolResult> {
         Ok(ToolResult::success("Done.".to_string()))
     }
 }
@@ -72,7 +75,10 @@ impl Tool for WebSearchTool {
         r#"{ "query": "search query", "count": "results (default 10)", "freshness": "pd=24h, pw=week, pm=month (optional)", "location": "city or 'city, state' for local results (optional)" }"#
     }
 
-    async fn execute(&self, args: &std::collections::HashMap<String, String>) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: &std::collections::HashMap<String, String>,
+    ) -> Result<ToolResult> {
         let query = args
             .get("query")
             .ok_or_else(|| anyhow::anyhow!("query argument required"))?;
@@ -133,7 +139,7 @@ async fn main() -> Result<()> {
         use diesel::prelude::*;
         use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
         pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
-        
+
         let mut conn = diesel::PgConnection::establish(&config.database_url)?;
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(|e| anyhow::anyhow!("Migration failed: {}", e))?;
@@ -158,10 +164,13 @@ async fn main() -> Result<()> {
 
     // Initialize scheduler (shared across all agents)
     let scheduler_db = Arc::new(scheduler::SchedulerDb::connect(&config.database_url)?);
-    
+
     // Create agent manager
     let agent_manager = Arc::new(AgentManager::new(&config, scheduler_db.clone())?);
-    info!("Agent manager initialized (workspace: {})", config.workspace_path);
+    info!(
+        "Agent manager initialized (workspace: {})",
+        config.workspace_path
+    );
 
     // Check if Signal is configured
     let signal_phone = match &config.signal_phone_number {
@@ -223,7 +232,8 @@ async fn main() -> Result<()> {
 
     // Signal health check interval (every 4 hours)
     // This refreshes prekeys to prevent silent send failures
-    let mut signal_health_interval = tokio::time::interval(std::time::Duration::from_secs(4 * 60 * 60));
+    let mut signal_health_interval =
+        tokio::time::interval(std::time::Duration::from_secs(4 * 60 * 60));
     signal_health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Skip the first immediate tick
     signal_health_interval.tick().await;
@@ -244,7 +254,7 @@ async fn main() -> Result<()> {
             Some(event) = scheduler_rx.recv() => {
                 let task = event.task;
                 info!("⏰ Processing scheduled task: {} ({})", task.description, task.task_type.as_str());
-                
+
                 // Look up the signal_identifier for this agent_id
                 let signal_identifier = match agent_manager.get_signal_identifier(task.agent_id) {
                     Ok(Some(id)) => id,
@@ -257,7 +267,7 @@ async fn main() -> Result<()> {
                         continue;
                     }
                 };
-                
+
                 // Handle different task types based on payload
                 match &task.payload {
                     scheduler::TaskPayload::Message(msg_payload) => {
@@ -272,7 +282,7 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            
+
             // Handle incoming messages
             Some(msg) = rx.recv() => {
                 // Check if sender is allowed
@@ -296,7 +306,7 @@ async fn main() -> Result<()> {
                         continue;
                     }
                 };
-                
+
                 info!("Using agent {} for user {}", agent_id, user_name);
 
                 // Store incoming message (sync, no embedding) and update embedding in background
@@ -313,7 +323,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 };
-                
+
                 // Update embedding in background
                 if let Some(msg_id) = user_msg_id {
                     let agent_clone = agent.clone();
@@ -335,22 +345,22 @@ async fn main() -> Result<()> {
                 // Process message with agent
                 let recipient = msg.source.clone();
                 let user_message = msg.message.clone();
-                
+
                 let mut had_error = false;
                 let max_steps = 10;
-                
+
                 for step_num in 0..max_steps {
                     let step_result = {
                         let mut agent_guard = agent.lock().await;
                         agent_guard.step(&user_message, step_num == 0).await
                     };
-                    
+
                     match step_result {
                         Ok(result) => {
                             // Send messages from this step IMMEDIATELY (don't wait for storage)
                             let msg_count = result.messages.len();
                             let mut messages_to_store: Vec<String> = Vec::new();
-                            
+
                             for (i, response) in result.messages.iter().enumerate() {
                                 let log_preview: String = response.chars().take(50).collect();
                                 info!("📤 Sending response ({}/{}): {}...", i + 1, msg_count, log_preview);
@@ -362,7 +372,7 @@ async fn main() -> Result<()> {
                                         error!("Failed to send reply: {}", e);
                                     }
                                 }
-                                
+
                                 // Queue for background storage
                                 messages_to_store.push(response.clone());
 
@@ -376,13 +386,13 @@ async fn main() -> Result<()> {
                                     tokio::time::sleep(tokio::time::Duration::from_millis(1450)).await;
                                 }
                             }
-                            
+
                             // Stop typing indicator
                             if msg_count > 0 {
                                 let client = signal_client.lock().await;
                                 let _ = client.send_typing(&recipient, true);
                             }
-                            
+
                             // Store messages SYNCHRONOUSLY so next step sees them in conversation history
                             // Only the embedding update is async (slow API call)
                             let mut msg_ids_for_embedding: Vec<(Uuid, String)> = Vec::new();
@@ -395,7 +405,7 @@ async fn main() -> Result<()> {
                                     msg_ids_for_embedding.push((id, response.clone()));
                                 }
                             }
-                            
+
                             // Async embedding updates (don't block next step)
                             if !msg_ids_for_embedding.is_empty() {
                                 let agent_clone = agent.clone();
@@ -408,7 +418,7 @@ async fn main() -> Result<()> {
                                     }
                                 });
                             }
-                            
+
                             // Store executed tool calls in background (still uses async store_tool_message)
                             if !result.executed_tools.is_empty() {
                                 let agent_clone = agent.clone();
@@ -424,7 +434,7 @@ async fn main() -> Result<()> {
                                 });
                                 info!("🔧 Queued {} tool calls for storage", result.executed_tools.len());
                             }
-                            
+
                             // If done, break
                             if result.done {
                                 break;
@@ -437,7 +447,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                
+
                 if had_error {
                     let client = signal_client.lock().await;
                     let _ = client.send_message(

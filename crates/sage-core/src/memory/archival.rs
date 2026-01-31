@@ -31,13 +31,13 @@ impl Passage {
             created_at: Utc::now(),
         }
     }
-    
+
     /// Add tags to the passage
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
         self
     }
-    
+
     /// Set the embedding
     pub fn with_embedding(mut self, embedding: Vec<f32>) -> Self {
         self.embedding = Some(embedding);
@@ -62,13 +62,10 @@ impl ArchivalSearchResult {
         } else {
             format!(" [tags: {}]", self.passage.tags.join(", "))
         };
-        
+
         format!(
             "[{}] ({}){}\n{}",
-            timestamp,
-            self.time_ago,
-            tags,
-            self.passage.content
+            timestamp, self.time_ago, tags, self.passage.content
         )
     }
 }
@@ -92,7 +89,7 @@ impl ArchivalManager {
         embedding_api_key: &str,
     ) -> Result<Self> {
         // TODO: Load passages from database
-        
+
         Ok(Self {
             agent_id,
             passages: Arc::new(RwLock::new(Vec::new())),
@@ -100,18 +97,18 @@ impl ArchivalManager {
             embedding_api_key: embedding_api_key.to_string(),
         })
     }
-    
+
     /// Get the total number of passages
     pub fn passage_count(&self) -> usize {
-        self.passages.read().ok()
-            .map(|p| p.len())
-            .unwrap_or(0)
+        self.passages.read().ok().map(|p| p.len()).unwrap_or(0)
     }
-    
+
     /// Get all unique tags across all passages
     #[allow(dead_code)]
     pub fn all_tags(&self) -> Vec<String> {
-        self.passages.read().ok()
+        self.passages
+            .read()
+            .ok()
             .map(|passages| {
                 let mut tags: Vec<String> = passages
                     .iter()
@@ -123,31 +120,33 @@ impl ArchivalManager {
             })
             .unwrap_or_default()
     }
-    
+
     /// Insert a new passage into archival memory
     pub async fn insert(&self, content: &str, tags: Option<Vec<String>>) -> Result<Uuid> {
         let mut passage = Passage::new(self.agent_id, content);
-        
+
         if let Some(t) = tags {
             passage = passage.with_tags(t);
         }
-        
+
         // Generate embedding
         let embedding = self.generate_embedding(content).await?;
         passage = passage.with_embedding(embedding);
-        
+
         let id = passage.id;
-        
+
         // Store in memory
-        let mut passages = self.passages.write()
+        let mut passages = self
+            .passages
+            .write()
             .map_err(|_| anyhow::anyhow!("Failed to acquire write lock"))?;
         passages.push(passage);
-        
+
         // TODO: Persist to database with pgvector
-        
+
         Ok(id)
     }
-    
+
     /// Search archival memory by semantic similarity
     pub async fn search(
         &self,
@@ -157,12 +156,14 @@ impl ArchivalManager {
     ) -> Result<Vec<ArchivalSearchResult>> {
         // Generate query embedding
         let query_embedding = self.generate_embedding(query).await?;
-        
-        let passages = self.passages.read()
+
+        let passages = self
+            .passages
+            .read()
             .map_err(|_| anyhow::anyhow!("Failed to acquire read lock"))?;
-        
+
         let now = Utc::now();
-        
+
         // Score all passages by cosine similarity
         let mut scored: Vec<(f32, &Passage)> = passages
             .iter()
@@ -181,10 +182,10 @@ impl ArchivalManager {
                 })
             })
             .collect();
-        
+
         // Sort by score (highest first)
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         // Take top_k results
         let results: Vec<ArchivalSearchResult> = scored
             .into_iter()
@@ -198,27 +199,30 @@ impl ArchivalManager {
                 }
             })
             .collect();
-        
+
         Ok(results)
     }
-    
+
     /// Generate an embedding for text
     async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
         // TODO: Call Maple embedding API (maple/nomic-embed-text)
         // For now, return a placeholder embedding
-        
+
         let client = reqwest::Client::new();
-        
+
         let response = client
             .post(format!("{}/embeddings", self.embedding_api_url))
-            .header("Authorization", format!("Bearer {}", self.embedding_api_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.embedding_api_key),
+            )
             .json(&serde_json::json!({
                 "model": "nomic-embed-text",
                 "input": text
             }))
             .send()
             .await;
-        
+
         match response {
             Ok(resp) => {
                 if resp.status().is_success() {
@@ -248,11 +252,11 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
-    
+
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    
+
     if norm_a == 0.0 || norm_b == 0.0 {
         0.0
     } else {
@@ -263,7 +267,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 /// Format a duration as human-readable "time ago"
 fn format_time_ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(then);
-    
+
     if duration.num_days() > 0 {
         format!("{}d ago", duration.num_days())
     } else if duration.num_hours() > 0 {
@@ -284,20 +288,20 @@ mod tests {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![1.0, 0.0, 0.0];
         assert!((cosine_similarity(&a, &b) - 1.0).abs() < 0.001);
-        
+
         let c = vec![0.0, 1.0, 0.0];
         assert!((cosine_similarity(&a, &c)).abs() < 0.001);
-        
+
         let d = vec![-1.0, 0.0, 0.0];
         assert!((cosine_similarity(&a, &d) + 1.0).abs() < 0.001);
     }
-    
+
     #[test]
     fn test_passage_creation() {
         let agent_id = Uuid::new_v4();
         let passage = Passage::new(agent_id, "Test content")
             .with_tags(vec!["tag1".to_string(), "tag2".to_string()]);
-        
+
         assert_eq!(passage.content, "Test content");
         assert_eq!(passage.tags, vec!["tag1", "tag2"]);
     }

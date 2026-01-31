@@ -126,15 +126,13 @@ impl CompactionManager {
             }
             Err(e) => {
                 tracing::warn!("Summarization failed, attempting correction: {}", e);
-                
+
                 // Try correction agent
                 if let Some(malformed) = extract_malformed_response(&e) {
-                    if let Ok(corrected) = self.try_correction(
-                        previous_summary,
-                        new_messages,
-                        &malformed,
-                        &e.to_string(),
-                    ).await {
+                    if let Ok(corrected) = self
+                        .try_correction(previous_summary, new_messages, &malformed, &e.to_string())
+                        .await
+                    {
                         return Ok(SummaryResult::new(
                             corrected,
                             from_sequence_id,
@@ -148,8 +146,12 @@ impl CompactionManager {
 
         // Retry loop
         for attempt in 1..=self.max_retries {
-            tracing::info!("Summarization retry attempt {}/{}", attempt, self.max_retries);
-            
+            tracing::info!(
+                "Summarization retry attempt {}/{}",
+                attempt,
+                self.max_retries
+            );
+
             match predictor.call(input.clone()).await {
                 Ok(response) => {
                     tracing::info!("Summarization succeeded on retry {}", attempt);
@@ -162,15 +164,18 @@ impl CompactionManager {
                 }
                 Err(e) => {
                     tracing::warn!("Summarization retry {} failed: {}", attempt, e);
-                    
+
                     // Try correction on each failure
                     if let Some(malformed) = extract_malformed_response(&e) {
-                        if let Ok(corrected) = self.try_correction(
-                            previous_summary,
-                            new_messages,
-                            &malformed,
-                            &e.to_string(),
-                        ).await {
+                        if let Ok(corrected) = self
+                            .try_correction(
+                                previous_summary,
+                                new_messages,
+                                &malformed,
+                                &e.to_string(),
+                            )
+                            .await
+                        {
                             return Ok(SummaryResult::new(
                                 corrected,
                                 from_sequence_id,
@@ -243,7 +248,7 @@ mod tests {
     #[test]
     fn test_summary_result_creation() {
         let summary = SummaryResult::new("Test summary", 1, 10, None);
-        
+
         assert_eq!(summary.summary, "Test summary");
         assert_eq!(summary.from_sequence_id, 1);
         assert_eq!(summary.to_sequence_id, 10);
@@ -254,7 +259,7 @@ mod tests {
     fn test_summary_result_with_previous() {
         let prev_id = Uuid::new_v4();
         let summary = SummaryResult::new("Chained summary", 11, 20, Some(prev_id));
-        
+
         assert_eq!(summary.from_sequence_id, 11);
         assert_eq!(summary.to_sequence_id, 20);
         assert_eq!(summary.previous_summary_id, Some(prev_id));
@@ -263,7 +268,7 @@ mod tests {
     #[test]
     fn test_should_compact() {
         let manager = CompactionManager::new();
-        
+
         // 80% threshold
         assert!(!manager.should_compact(50_000, 256_000, 0.80)); // 50k < 204k
         assert!(manager.should_compact(210_000, 256_000, 0.80)); // 210k > 204k

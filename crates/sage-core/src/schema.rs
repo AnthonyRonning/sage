@@ -7,7 +7,7 @@ use pgvector::sql_types::Vector;
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::Vector;
-    
+
     agents (id) {
         id -> Uuid,
         name -> Varchar,
@@ -25,7 +25,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::Vector;
-    
+
     blocks (id) {
         id -> Uuid,
         agent_id -> Text,
@@ -43,7 +43,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::Vector;
-    
+
     messages (id) {
         id -> Uuid,
         agent_id -> Uuid,
@@ -61,7 +61,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::Vector;
-    
+
     passages (id) {
         id -> Uuid,
         agent_id -> Text,
@@ -75,7 +75,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::Vector;
-    
+
     summaries (id) {
         id -> Uuid,
         agent_id -> Uuid,
@@ -90,7 +90,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    
+
     user_preferences (id) {
         id -> Uuid,
         agent_id -> Uuid,
@@ -103,7 +103,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    
+
     scheduled_tasks (id) {
         id -> Uuid,
         agent_id -> Uuid,
@@ -123,7 +123,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    
+
     chat_contexts (id) {
         id -> Uuid,
         signal_identifier -> Text,

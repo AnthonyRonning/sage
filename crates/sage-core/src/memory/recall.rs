@@ -33,9 +33,9 @@ impl RecallSearchResult {
         let timestamp = self.message.created_at.format("%Y-%m-%d %H:%M:%S UTC");
         let role = &self.message.role;
         let content = &self.message.content;
-        
+
         let mut result = format!("[{}] ({}, {})\n", timestamp, self.time_ago, role);
-        
+
         // Truncate long content (handle UTF-8 boundaries safely)
         if content.len() > 500 {
             let mut end = 500;
@@ -47,7 +47,7 @@ impl RecallSearchResult {
         } else {
             result.push_str(content);
         }
-        
+
         result
     }
 }
@@ -75,7 +75,7 @@ impl RecallManager {
         embedding_api_key: &str,
     ) -> Result<Self> {
         // TODO: Load messages from database
-        
+
         Ok(Self {
             agent_id,
             messages: Arc::new(RwLock::new(Vec::new())),
@@ -83,19 +83,19 @@ impl RecallManager {
             embedding_api_key: embedding_api_key.to_string(),
         })
     }
-    
+
     /// Get the total number of messages in recall memory
     pub fn message_count(&self) -> usize {
-        self.messages.read().ok()
-            .map(|m| m.len())
-            .unwrap_or(0)
+        self.messages.read().ok().map(|m| m.len()).unwrap_or(0)
     }
-    
+
     /// Add a message to recall memory
     pub fn add_message(&self, role: &str, content: &str) -> Result<Uuid> {
-        let mut messages = self.messages.write()
+        let mut messages = self
+            .messages
+            .write()
             .map_err(|_| anyhow::anyhow!("Failed to acquire write lock"))?;
-        
+
         let sequence_id = messages.len() as i64;
         let message = RecallMessage {
             id: Uuid::new_v4(),
@@ -105,24 +105,26 @@ impl RecallManager {
             created_at: Utc::now(),
             sequence_id,
         };
-        
+
         let id = message.id;
         messages.push(message);
-        
+
         // TODO: Persist to database
         // TODO: Generate and store embedding
-        
+
         Ok(id)
     }
-    
+
     /// Search recall memory by keyword
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<RecallSearchResult>> {
-        let messages = self.messages.read()
+        let messages = self
+            .messages
+            .read()
             .map_err(|_| anyhow::anyhow!("Failed to acquire read lock"))?;
-        
+
         let query_lower = query.to_lowercase();
         let now = Utc::now();
-        
+
         let mut results: Vec<RecallSearchResult> = messages
             .iter()
             .filter(|m| {
@@ -145,31 +147,37 @@ impl RecallManager {
                 }
             })
             .collect();
-        
+
         // Sort by recency (most recent first)
         results.sort_by(|a, b| b.message.created_at.cmp(&a.message.created_at));
-        
+
         // Limit results
         results.truncate(limit);
-        
+
         Ok(results)
     }
-    
+
     /// Search recall memory with semantic similarity
     #[allow(dead_code)]
-    pub async fn search_semantic(&self, query: &str, limit: usize) -> Result<Vec<RecallSearchResult>> {
+    pub async fn search_semantic(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<RecallSearchResult>> {
         // TODO: Implement semantic search using embeddings
         // 1. Generate embedding for query
         // 2. Search pgvector for similar messages
         // 3. Combine with keyword search (hybrid)
-        
+
         // For now, fall back to keyword search
         self.search(query, limit)
     }
-    
+
     /// Get recent messages (for context building)
     pub fn get_recent(&self, limit: usize) -> Vec<RecallMessage> {
-        self.messages.read().ok()
+        self.messages
+            .read()
+            .ok()
             .map(|m| {
                 m.iter()
                     .rev()
@@ -182,11 +190,13 @@ impl RecallManager {
             })
             .unwrap_or_default()
     }
-    
+
     /// Get messages by IDs (for loading in-context messages)
     #[allow(dead_code)]
     pub fn get_by_ids(&self, ids: &[Uuid]) -> Vec<RecallMessage> {
-        self.messages.read().ok()
+        self.messages
+            .read()
+            .ok()
             .map(|messages| {
                 ids.iter()
                     .filter_map(|id| messages.iter().find(|m| m.id == *id).cloned())
@@ -199,7 +209,7 @@ impl RecallManager {
 /// Format a duration as human-readable "time ago"
 fn format_time_ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(then);
-    
+
     if duration.num_days() > 0 {
         format!("{}d ago", duration.num_days())
     } else if duration.num_hours() > 0 {
@@ -218,32 +228,31 @@ mod tests {
     #[tokio::test]
     async fn test_recall_manager() {
         let agent_id = Uuid::new_v4();
-        let manager = RecallManager::new(
-            agent_id, 
-            "", 
-            "http://localhost:8080/v1",
-            "test-key"
-        ).await.unwrap();
-        
+        let manager = RecallManager::new(agent_id, "", "http://localhost:8080/v1", "test-key")
+            .await
+            .unwrap();
+
         assert_eq!(manager.message_count(), 0);
-        
+
         manager.add_message("user", "Hello, how are you?").unwrap();
-        manager.add_message("assistant", "I'm doing well, thank you!").unwrap();
-        
+        manager
+            .add_message("assistant", "I'm doing well, thank you!")
+            .unwrap();
+
         assert_eq!(manager.message_count(), 2);
-        
+
         let results = manager.search("hello", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].message.role, "user");
     }
-    
+
     #[test]
     fn test_format_time_ago() {
         let now = Utc::now();
         let five_min_ago = now - chrono::Duration::minutes(5);
         let two_hours_ago = now - chrono::Duration::hours(2);
         let three_days_ago = now - chrono::Duration::days(3);
-        
+
         assert_eq!(format_time_ago(five_min_ago, now), "5m ago");
         assert_eq!(format_time_ago(two_hours_ago, now), "2h ago");
         assert_eq!(format_time_ago(three_days_ago, now), "3d ago");

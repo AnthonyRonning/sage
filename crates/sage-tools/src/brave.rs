@@ -56,38 +56,43 @@ impl BraveClient {
     }
 
     /// Perform a search with full Pro features
-    pub async fn search(&self, query: &str, options: Option<SearchOptions>) -> Result<SearchResponse, BraveError> {
+    pub async fn search(
+        &self,
+        query: &str,
+        options: Option<SearchOptions>,
+    ) -> Result<SearchResponse, BraveError> {
         let opts = options.unwrap_or_default();
         let url = format!("{}/web/search", BRAVE_API_BASE);
 
         // Build query parameters
         let mut params = vec![
             ("q", query.to_string()),
-            ("summary", "1".to_string()),           // Enable AI summarizer
+            ("summary", "1".to_string()), // Enable AI summarizer
             ("extra_snippets", "true".to_string()), // Get additional context
             ("enable_rich_callback", "1".to_string()), // Enable rich data (Pro)
-            ("spellcheck", "true".to_string()),     // Auto-correct typos
+            ("spellcheck", "true".to_string()), // Auto-correct typos
         ];
-        
+
         if let Some(c) = opts.count {
             params.push(("count", c.min(20).to_string()));
         }
-        
+
         if let Some(ref freshness) = opts.freshness {
             params.push(("freshness", freshness.clone()));
         }
 
         // Build request with location headers if provided
-        let mut request = self.client
+        let mut request = self
+            .client
             .get(&url)
             .header("X-Subscription-Token", self.api_key.as_str())
             .header("Accept", "application/json");
-        
+
         // Add location headers for local results
         if let Some(ref tz) = opts.timezone {
             request = request.header("x-loc-timezone", tz.as_str());
         }
-        
+
         if let Some(ref location) = opts.location {
             // Parse "city, state" format
             let parts: Vec<&str> = location.split(',').map(|s| s.trim()).collect();
@@ -99,10 +104,7 @@ impl BraveClient {
             }
         }
 
-        let response = request
-            .query(&params)
-            .send()
-            .await?;
+        let response = request.query(&params).send().await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -114,7 +116,7 @@ impl BraveClient {
         }
 
         let mut search_response: SearchResponse = response.json().await?;
-        
+
         // Automatically fetch AI summary if available
         if let Some(ref summarizer) = search_response.summarizer {
             debug!("Fetching Brave AI summary...");
@@ -127,7 +129,7 @@ impl BraveClient {
                 }
             }
         }
-        
+
         // Automatically fetch rich data if available (weather, stocks, etc.)
         if let Some(ref rich) = search_response.rich {
             info!("Rich data available: {:?}", rich.hint.vertical);
@@ -140,15 +142,16 @@ impl BraveClient {
                 }
             }
         }
-        
+
         Ok(search_response)
     }
-    
+
     /// Fetch AI summary using the summarizer key
     async fn fetch_summary(&self, key: &str) -> Result<SummarizerResponse, BraveError> {
         let url = format!("{}/summarizer/search", BRAVE_API_BASE);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("X-Subscription-Token", self.api_key.as_str())
             .header("Accept", "application/json")
@@ -167,12 +170,13 @@ impl BraveClient {
 
         Ok(response.json().await?)
     }
-    
+
     /// Fetch rich data (weather, stocks, sports, etc.) using callback key
     async fn fetch_rich(&self, callback_key: &str) -> Result<RichResponse, BraveError> {
         let url = format!("{}/web/rich", BRAVE_API_BASE);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("X-Subscription-Token", self.api_key.as_str())
             .header("Accept", "application/json")
@@ -195,7 +199,9 @@ impl BraveClient {
 
 impl std::fmt::Debug for BraveClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BraveClient").field("api_key", &"[REDACTED]").finish()
+        f.debug_struct("BraveClient")
+            .field("api_key", &"[REDACTED]")
+            .finish()
     }
 }
 
@@ -325,7 +331,7 @@ impl SummarizerResponse {
     pub fn extract_text(&self) -> Option<String> {
         let items = self.summary.as_ref()?;
         let mut text = String::new();
-        
+
         for item in items {
             if item.item_type == "token" {
                 if let Some(data) = &item.data {
@@ -335,8 +341,12 @@ impl SummarizerResponse {
                 }
             }
         }
-        
-        if text.is_empty() { None } else { Some(text) }
+
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
     }
 }
 
@@ -374,7 +384,7 @@ impl RichResult {
     /// Format a single rich result for display
     pub fn format(&self) -> Option<String> {
         let subtype = self.subtype.as_deref()?;
-        
+
         match subtype {
             "weather" => self.format_weather(),
             "stock" => self.format_stock(),
@@ -385,50 +395,64 @@ impl RichResult {
             "definitions" => self.format_definition(),
             _ => {
                 // For unknown types, return raw JSON summary
-                Some(format!("**{}**: {}", subtype, 
-                    serde_json::to_string_pretty(&self.data).unwrap_or_default()))
+                Some(format!(
+                    "**{}**: {}",
+                    subtype,
+                    serde_json::to_string_pretty(&self.data).unwrap_or_default()
+                ))
             }
         }
     }
-    
+
     fn format_weather(&self) -> Option<String> {
         let mut output = String::new();
-        
+
         // Extract weather data from the API response structure
         if let Some(weather) = self.data.get("weather") {
             // Location info
             if let Some(location) = weather.get("location") {
-                let name = location.get("name").and_then(|n| n.as_str()).unwrap_or("Unknown");
+                let name = location
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("Unknown");
                 let state = location.get("state").and_then(|s| s.as_str()).unwrap_or("");
                 output.push_str(&format!("**Weather for {}, {}**\n\n", name, state));
             }
-            
+
             // Current conditions (field is "current_weather", temps in Celsius)
             if let Some(current) = weather.get("current_weather") {
                 output.push_str("**Current Conditions:**\n");
                 if let Some(temp_c) = current.get("temp").and_then(|t| t.as_f64()) {
-                    let temp_f = temp_c * 9.0/5.0 + 32.0;
+                    let temp_f = temp_c * 9.0 / 5.0 + 32.0;
                     output.push_str(&format!("  Temperature: {:.0}°F\n", temp_f));
                 }
                 if let Some(feels_c) = current.get("feels_like").and_then(|t| t.as_f64()) {
-                    let feels_f = feels_c * 9.0/5.0 + 32.0;
+                    let feels_f = feels_c * 9.0 / 5.0 + 32.0;
                     output.push_str(&format!("  Feels like: {:.0}°F\n", feels_f));
                 }
                 // Description is nested: weather.description
-                if let Some(desc) = current.get("weather").and_then(|w| w.get("description")).and_then(|d| d.as_str()) {
+                if let Some(desc) = current
+                    .get("weather")
+                    .and_then(|w| w.get("description"))
+                    .and_then(|d| d.as_str())
+                {
                     output.push_str(&format!("  Conditions: {}\n", desc));
                 }
                 if let Some(humidity) = current.get("humidity") {
                     output.push_str(&format!("  Humidity: {}%\n", humidity));
                 }
                 // Wind is nested: wind.speed (m/s, convert to mph)
-                if let Some(wind_ms) = current.get("wind").and_then(|w| w.get("speed")).and_then(|s| s.as_f64()) {
+                if let Some(wind_ms) = current
+                    .get("wind")
+                    .and_then(|w| w.get("speed"))
+                    .and_then(|s| s.as_f64())
+                {
                     let wind_mph = wind_ms * 2.237;
                     output.push_str(&format!("  Wind: {:.0} mph\n", wind_mph));
                 }
                 output.push('\n');
             }
-            
+
             // Weather alerts (important!)
             if let Some(alerts) = weather.get("alerts").and_then(|a| a.as_array()) {
                 if !alerts.is_empty() {
@@ -439,21 +463,25 @@ impl RichResult {
                             if let Some(desc) = alert.get("description").and_then(|d| d.as_str()) {
                                 // Truncate long descriptions
                                 let short_desc: String = desc.chars().take(200).collect();
-                                output.push_str(&format!("    {}{}\n", short_desc, 
-                                    if desc.len() > 200 { "..." } else { "" }));
+                                output.push_str(&format!(
+                                    "    {}{}\n",
+                                    short_desc,
+                                    if desc.len() > 200 { "..." } else { "" }
+                                ));
                             }
                         }
                     }
                     output.push('\n');
                 }
             }
-            
+
             // Daily forecast
             if let Some(daily) = weather.get("daily").and_then(|d| d.as_array()) {
                 output.push_str("**Forecast:**\n");
                 for (i, day) in daily.iter().take(5).enumerate() {
                     // Get date or fallback to day number
-                    let day_name = day.get("date_i18n")
+                    let day_name = day
+                        .get("date_i18n")
                         .and_then(|d| d.as_str())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| match i {
@@ -461,39 +489,45 @@ impl RichResult {
                             1 => "Tomorrow".to_string(),
                             _ => format!("Day {}", i + 1),
                         });
-                    
+
                     // Temperature is nested: temperature.max / temperature.min
-                    let high = day.get("temperature")
+                    let high = day
+                        .get("temperature")
                         .and_then(|t| t.get("max"))
                         .and_then(|v| v.as_f64())
-                        .map(|c| format!("{:.0}°F", c * 9.0/5.0 + 32.0)) // Convert C to F
+                        .map(|c| format!("{:.0}°F", c * 9.0 / 5.0 + 32.0)) // Convert C to F
                         .unwrap_or_default();
-                    let low = day.get("temperature")
+                    let low = day
+                        .get("temperature")
                         .and_then(|t| t.get("min"))
                         .and_then(|v| v.as_f64())
-                        .map(|c| format!("{:.0}°F", c * 9.0/5.0 + 32.0))
+                        .map(|c| format!("{:.0}°F", c * 9.0 / 5.0 + 32.0))
                         .unwrap_or_default();
-                    
+
                     // Description is nested: weather.description
-                    let desc = day.get("weather")
+                    let desc = day
+                        .get("weather")
                         .and_then(|w| w.get("description"))
                         .and_then(|d| d.as_str())
                         .unwrap_or("");
-                    
-                    output.push_str(&format!("  {} - High: {}, Low: {} - {}\n", day_name, high, low, desc));
+
+                    output.push_str(&format!(
+                        "  {} - High: {}, Low: {} - {}\n",
+                        day_name, high, low, desc
+                    ));
                 }
             }
         } else {
             output.push_str("**Weather data:**\n");
             output.push_str(&serde_json::to_string_pretty(&self.data).unwrap_or_default());
         }
-        
+
         Some(output)
     }
-    
+
     fn format_stock(&self) -> Option<String> {
         let mut output = String::from("**Stock:**\n\n");
-        
+
         if let Some(symbol) = self.data.get("symbol").and_then(|s| s.as_str()) {
             output.push_str(&format!("Symbol: {}\n", symbol));
         }
@@ -509,19 +543,19 @@ impl RichResult {
         if let Some(change_pct) = self.data.get("change_percent") {
             output.push_str(&format!("Change %: {}%\n", change_pct));
         }
-        
+
         Some(output)
     }
-    
+
     fn format_currency(&self) -> Option<String> {
         let mut output = String::from("**Currency Conversion:**\n\n");
         output.push_str(&serde_json::to_string_pretty(&self.data).unwrap_or_default());
         Some(output)
     }
-    
+
     fn format_crypto(&self) -> Option<String> {
         let mut output = String::from("**Cryptocurrency:**\n\n");
-        
+
         if let Some(name) = self.data.get("name").and_then(|s| s.as_str()) {
             output.push_str(&format!("Name: {}\n", name));
         }
@@ -534,10 +568,10 @@ impl RichResult {
         if let Some(change) = self.data.get("change_24h") {
             output.push_str(&format!("24h Change: {}%\n", change));
         }
-        
+
         Some(output)
     }
-    
+
     fn format_calculator(&self) -> Option<String> {
         if let Some(result) = self.data.get("result") {
             Some(format!("**Calculator:** {}", result))
@@ -545,7 +579,7 @@ impl RichResult {
             None
         }
     }
-    
+
     fn format_unit_conversion(&self) -> Option<String> {
         let mut output = String::from("**Unit Conversion:**\n");
         if let Some(result) = self.data.get("result").and_then(|r| r.as_str()) {
@@ -553,10 +587,10 @@ impl RichResult {
         }
         Some(output)
     }
-    
+
     fn format_definition(&self) -> Option<String> {
         let mut output = String::from("**Definition:**\n\n");
-        
+
         if let Some(word) = self.data.get("word").and_then(|w| w.as_str()) {
             output.push_str(&format!("**{}**\n", word));
         }
@@ -567,7 +601,7 @@ impl RichResult {
                 }
             }
         }
-        
+
         Some(output)
     }
 }
@@ -620,7 +654,10 @@ impl SearchResponse {
                 if !results.is_empty() {
                     output.push_str("**FAQ:**\n\n");
                     for faq_item in results.iter().take(3) {
-                        output.push_str(&format!("Q: {}\nA: {}\n\n", faq_item.question, faq_item.answer));
+                        output.push_str(&format!(
+                            "Q: {}\nA: {}\n\n",
+                            faq_item.question, faq_item.answer
+                        ));
                     }
                 }
             }
@@ -632,7 +669,11 @@ impl SearchResponse {
                 if !results.is_empty() {
                     output.push_str("**Search Results:**\n\n");
                     for (i, result) in results.iter().take(5).enumerate() {
-                        let age = result.age.as_deref().map(|a| format!(" ({})", a)).unwrap_or_default();
+                        let age = result
+                            .age
+                            .as_deref()
+                            .map(|a| format!(" ({})", a))
+                            .unwrap_or_default();
                         output.push_str(&format!(
                             "{}. {}{}\n   URL: {}\n   {}\n",
                             i + 1,
@@ -658,7 +699,11 @@ impl SearchResponse {
                 if !results.is_empty() {
                     output.push_str("**Recent News:**\n\n");
                     for (i, result) in results.iter().take(3).enumerate() {
-                        let age = result.age.as_deref().map(|a| format!(" ({})", a)).unwrap_or_default();
+                        let age = result
+                            .age
+                            .as_deref()
+                            .map(|a| format!(" ({})", a))
+                            .unwrap_or_default();
                         output.push_str(&format!(
                             "{}. {}{}\n   URL: {}\n   {}\n\n",
                             i + 1,
@@ -678,11 +723,7 @@ impl SearchResponse {
                 if !results.is_empty() {
                     output.push_str("**Discussions:**\n\n");
                     for result in results.iter().take(2) {
-                        output.push_str(&format!(
-                            "- {}\n  {}\n\n",
-                            result.title,
-                            result.url,
-                        ));
+                        output.push_str(&format!("- {}\n  {}\n\n", result.title, result.url,));
                     }
                 }
             }

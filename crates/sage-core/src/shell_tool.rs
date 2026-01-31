@@ -17,7 +17,7 @@ const BLOCKED_PATTERNS: &[&str] = &[
     "rm -rf ~",
     "mkfs",
     "dd if=",
-    ":(){:|:&};:",  // Fork bomb
+    ":(){:|:&};:", // Fork bomb
     "> /dev/sd",
     "chmod -R 777 /",
     "shutdown",
@@ -46,7 +46,7 @@ impl ShellTool {
             workspace: workspace.into(),
         }
     }
-    
+
     /// Check if a command contains blocked patterns
     fn is_blocked(&self, command: &str) -> Option<&'static str> {
         let lower = command.to_lowercase();
@@ -57,7 +57,7 @@ impl ShellTool {
         }
         None
     }
-    
+
     /// Truncate output if too long (handles UTF-8 boundaries safely)
     fn truncate_output(&self, output: String) -> String {
         if output.len() > MAX_OUTPUT_SIZE {
@@ -68,7 +68,9 @@ impl ShellTool {
             }
             format!(
                 "{}\n\n[OUTPUT TRUNCATED - exceeded {} bytes, showing first {}]",
-                &output[..end], output.len(), end
+                &output[..end],
+                output.len(),
+                end
             )
         } else {
             output
@@ -81,28 +83,31 @@ impl Tool for ShellTool {
     fn name(&self) -> &str {
         "shell"
     }
-    
+
     fn description(&self) -> &str {
         "Execute a shell command in the workspace. Has access to CLI tools: git, curl, jq, grep, sed, awk, python3, node, etc. Use for file operations, running scripts, or system commands."
     }
-    
+
     fn args_schema(&self) -> &str {
         r#"{"command": "shell command to execute (supports pipes, redirects)", "timeout": "optional timeout in seconds (default 60, max 300)"}"#
     }
-    
+
     async fn execute(&self, args: &HashMap<String, String>) -> Result<ToolResult> {
         let command = args
             .get("command")
             .ok_or_else(|| anyhow::anyhow!("'command' argument is required"))?;
-        
+
         let timeout: u64 = args
             .get("timeout")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_TIMEOUT)
             .min(MAX_TIMEOUT);
-        
-        info!("Executing shell command: {} (timeout: {}s)", command, timeout);
-        
+
+        info!(
+            "Executing shell command: {} (timeout: {}s)",
+            command, timeout
+        );
+
         // Check for blocked patterns
         if let Some(pattern) = self.is_blocked(command) {
             warn!("Blocked dangerous command pattern: {}", pattern);
@@ -112,10 +117,10 @@ impl Tool for ShellTool {
                 error: Some("Security violation".to_string()),
             });
         }
-        
+
         // Ensure workspace exists
         std::fs::create_dir_all(&self.workspace).ok();
-        
+
         // Execute command via bash
         let result = Command::new("bash")
             .args(["-c", command])
@@ -123,29 +128,29 @@ impl Tool for ShellTool {
             .env("HOME", &self.workspace)
             .env("PWD", &self.workspace)
             .output();
-        
+
         match result {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let exit_code = output.status.code().unwrap_or(-1);
-                
+
                 let mut result_parts = Vec::new();
-                
+
                 if !stdout.is_empty() {
                     result_parts.push(format!("STDOUT:\n{}", stdout.trim()));
                 }
-                
+
                 if !stderr.is_empty() {
                     result_parts.push(format!("STDERR:\n{}", stderr.trim()));
                 }
-                
+
                 result_parts.push(format!("EXIT CODE: {}", exit_code));
-                
+
                 let output_str = self.truncate_output(result_parts.join("\n\n"));
-                
+
                 debug!("Shell command completed with exit code {}", exit_code);
-                
+
                 Ok(ToolResult {
                     success: output.status.success(),
                     output: output_str,
@@ -156,13 +161,11 @@ impl Tool for ShellTool {
                     },
                 })
             }
-            Err(e) => {
-                Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(format!("Failed to execute command: {}", e)),
-                })
-            }
+            Err(e) => Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Failed to execute command: {}", e)),
+            }),
         }
     }
 }
