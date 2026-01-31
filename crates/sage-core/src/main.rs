@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};

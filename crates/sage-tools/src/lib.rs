@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+
 //! Sage Tools - capabilities that Sage can use
 //! 
 //! Tools are organized by category:
