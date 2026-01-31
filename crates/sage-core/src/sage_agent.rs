@@ -650,7 +650,7 @@ impl SageAgent {
                     String::new()
                 };
                 
-                if tool_results.len() == 1 {
+                let result = if tool_results.len() == 1 {
                     format!("{}=== COMPLETED TOOL EXECUTION ===\n{}\n=== END TOOL RESULT ===\n\nDecide what to do next: respond to the user with NEW information, call more tools, or call 'done' if finished.", 
                         already_sent, tool_results[0])
                 } else {
@@ -662,7 +662,13 @@ impl SageAgent {
                         .join("\n\n");
                     format!("{}=== COMPLETED TOOL EXECUTIONS ({} tools) ===\n{}\n=== END TOOL RESULTS ===\n\nDecide what to do next: respond to the user with NEW information, call more tools, or call 'done' if finished.", 
                         already_sent, tool_results.len(), results_text)
-                }
+                };
+                
+                // Clear tool results after presenting them - they've been shown to the LLM
+                // New tool calls this step will add fresh results
+                self.current_tool_results.clear();
+                
+                result
             }
         };
         
