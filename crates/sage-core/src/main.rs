@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use uuid::Uuid;
 
 mod agent_manager;
 mod config;
@@ -380,24 +381,27 @@ async fn main() -> Result<()> {
                                 let _ = client.send_typing(&recipient, true);
                             }
                             
-                            // Store messages: sync DB write, then async embedding update
-                            if !messages_to_store.is_empty() {
+                            // Store messages SYNCHRONOUSLY so next step sees them in conversation history
+                            // Only the embedding update is async (slow API call)
+                            let mut msg_ids_for_embedding: Vec<(Uuid, String)> = Vec::new();
+                            for response in &messages_to_store {
+                                let msg_id = {
+                                    let agent_guard = agent.lock().await;
+                                    agent_guard.store_message_sync(&recipient, "assistant", response)
+                                };
+                                if let Ok(id) = msg_id {
+                                    msg_ids_for_embedding.push((id, response.clone()));
+                                }
+                            }
+                            
+                            // Async embedding updates (don't block next step)
+                            if !msg_ids_for_embedding.is_empty() {
                                 let agent_clone = agent.clone();
-                                let recipient_clone = recipient.clone();
                                 tokio::spawn(async move {
-                                    for response in messages_to_store {
-                                        // Sync store (fast, no embedding)
-                                        let msg_id = {
-                                            let agent_guard = agent_clone.lock().await;
-                                            agent_guard.store_message_sync(&recipient_clone, "assistant", &response)
-                                        };
-                                        
-                                        // Async embedding update
-                                        if let Ok(msg_id) = msg_id {
-                                            let agent_guard = agent_clone.lock().await;
-                                            if let Err(e) = agent_guard.update_message_embedding(msg_id, &response).await {
-                                                tracing::warn!("Failed to update embedding: {}", e);
-                                            }
+                                    for (msg_id, content) in msg_ids_for_embedding {
+                                        let agent_guard = agent_clone.lock().await;
+                                        if let Err(e) = agent_guard.update_message_embedding(msg_id, &content).await {
+                                            tracing::warn!("Failed to update embedding: {}", e);
                                         }
                                     }
                                 });

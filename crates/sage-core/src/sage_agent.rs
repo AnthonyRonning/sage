@@ -32,13 +32,13 @@ pub struct ToolCall {
 /// The instruction is passed to the Predict builder.
 #[derive(dspy_rs::Signature, Clone, Debug)]
 pub struct AgentResponse {
-    #[input(desc = "The input to respond to - either a user message or tool result")]
+    #[input(desc = "The input to respond to - either a user message or tool execution result")]
     pub input: String,
 
-    #[input(desc = "Summary of older conversation context, or empty if this is a new conversation")]
+    #[input(desc = "Compacted summary of very old messages (only present for long conversations). Ignore if empty.")]
     pub previous_context_summary: String,
 
-    #[input]
+    #[input(desc = "Recent conversation history including your messages and tool results")]
     pub conversation_context: String,
 
     #[input]
@@ -309,8 +309,9 @@ pub struct SageAgent {
     memory: Option<MemoryManager>,
     /// Tool results from current request cycle only (not persisted)
     current_tool_results: Vec<Message>,
-    /// Track what was sent in previous step (messages count + tool names) for context
-    previous_step_summary: Option<(usize, Vec<String>)>,
+    /// Track what was sent in previous step (messages + tool names) for context
+    /// The messages Vec contains the actual message content sent
+    previous_step_summary: Option<(Vec<String>, Vec<String>)>,
     max_steps: usize,
 }
 
@@ -641,27 +642,51 @@ impl SageAgent {
             if tool_results.is_empty() {
                 user_message.to_string()
             } else {
-                // Build summary of what was already sent this turn
-                let already_sent = if let Some((msg_count, tool_names)) = &self.previous_step_summary {
+                // Build summary of what was already sent this turn, including the actual messages
+                let already_sent = if let Some((sent_messages, tool_names)) = &self.previous_step_summary {
                     let tools_str = tool_names.join(", ");
-                    format!("[You already sent {} message(s) and called {} this turn. Tools have executed:]\n\n", 
-                        msg_count, tools_str)
+                    let msgs_preview = if sent_messages.is_empty() {
+                        String::new()
+                    } else {
+                        let msgs_text = sent_messages.iter()
+                            .enumerate()
+                            .map(|(i, m)| format!("  {}. \"{}\"", i + 1, m))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        format!("\nMessages you already sent to user:\n{}\n", msgs_text)
+                    };
+                    format!("[You already sent {} message(s) and called {} this turn.{}Tools have executed:]\n\n", 
+                        sent_messages.len(), tools_str, msgs_preview)
                 } else {
                     String::new()
                 };
                 
+                let tool_result_instructions = r#"
+
+=== TOOL RESULT PROCESSING MODE ===
+This is a CONTINUATION of your previous turn, NOT a new conversation.
+Your previous messages are already visible to the user in conversation_context.
+
+RULES:
+1. SILENCE IS DEFAULT - You do NOT need to acknowledge the tool result
+2. DO NOT say: "I see the results", "Let me analyze", "Based on what I found", "Here's what the tool returned"
+3. DO NOT repeat or rephrase what you already said
+4. If the tool was for YOUR benefit (memory ops, archival), call 'done' immediately
+5. Only send messages if you have GENUINELY NEW information the user hasn't seen
+
+SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If no → call 'done'"#;
+
                 let result = if tool_results.len() == 1 {
-                    format!("{}=== COMPLETED TOOL EXECUTION ===\n{}\n=== END TOOL RESULT ===\n\nDecide what to do next: respond to the user with NEW information, call more tools, or call 'done' if finished.", 
-                        already_sent, tool_results[0])
+                    format!("{}=== TOOL RESULT ===\n{}\n=== END TOOL RESULT ==={}", 
+                        already_sent, tool_results[0], tool_result_instructions)
                 } else {
-                    // Multiple tool results - show all of them clearly
                     let results_text = tool_results.iter()
                         .enumerate()
                         .map(|(i, r)| format!("--- Tool {} ---\n{}", i + 1, r))
                         .collect::<Vec<_>>()
                         .join("\n\n");
-                    format!("{}=== COMPLETED TOOL EXECUTIONS ({} tools) ===\n{}\n=== END TOOL RESULTS ===\n\nDecide what to do next: respond to the user with NEW information, call more tools, or call 'done' if finished.", 
-                        already_sent, tool_results.len(), results_text)
+                    format!("{}=== TOOL RESULTS ({} tools) ===\n{}\n=== END TOOL RESULTS ==={}", 
+                        already_sent, tool_results.len(), results_text, tool_result_instructions)
                 };
                 
                 // Clear tool results after presenting them - they've been shown to the LLM
@@ -784,7 +809,7 @@ impl SageAgent {
             let tool_names: Vec<String> = response.tool_calls.iter()
                 .map(|tc| tc.name.clone())
                 .collect();
-            self.previous_step_summary = Some((messages.len(), tool_names));
+            self.previous_step_summary = Some((messages.clone(), tool_names));
         }
 
         Ok(StepResult {
