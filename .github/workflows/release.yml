@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-x86_64
+          
+          # Linux ARM64 (native build on ARM runner)
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm64-4core
+            name: linux-aarch64
+          
+          # macOS Apple Silicon (M1/M2/M3)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: macos-aarch64
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../sage-${{ matrix.name }}.tar.gz sage
+          cd -
+          echo "ASSET_PATH=sage-${{ matrix.name }}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sage-${{ matrix.name }}
+          path: ${{ env.ASSET_PATH }}
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            cd "$dir"
+            for file in *; do
+              sha256sum "$file" > "$file.sha256"
+              mv "$file" "$file.sha256" ../
+            done
+            cd ..
+            rmdir "$dir"
+          done
+          cd ..
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          cat << EOF > release_notes.md
+          ## 🌿 Sage $VERSION
+          
+          Privacy-first personal AI agent with persistent memory.
+          
+          ### Installation
+          
+          #### 🐳 Docker (Recommended)
+          \`\`\`bash
+          docker pull ghcr.io/anthonyronning/sage:$VERSION
+          \`\`\`
+          
+          #### 📦 Pre-built Binaries
+          Download the appropriate binary for your platform below.
+          
+          ### Checksums
+          All binaries include SHA256 checksums for verification.
+          
+          ### Supported Platforms
+          - Linux x86_64
+          - Linux ARM64
+          - macOS Apple Silicon (M1/M2/M3)
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.release_notes.outputs.VERSION }}
+          body_path: release_notes.md
+          files: artifacts/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
