@@ -222,8 +222,8 @@ setup-hooks:
     git config core.hooksPath .githooks
     @echo "✅ Git hooks configured. Pre-commit will run fmt, clippy, and tests."
 
-# Run all checks (same as pre-commit)
-check:
+# Run all CI checks (same as pre-commit hook)
+ci-check:
     cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test --all-features
