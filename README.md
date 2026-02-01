@@ -59,6 +59,120 @@ All embeddings are generated via Maple's TEE-based embedding API (nomic-embed-te
 
 The codebase is structured around [DSRs](https://github.com/krypticmouse/DSRs) signatures, enabling future **GEPA (Genetic-Pareto) optimization** of prompts based on collected traces and feedback metrics.
 
+### DSRs Signature Architecture
+
+Sage uses typed DSRs signatures to define the contract between inputs and outputs. This makes the agent's interface explicit, debuggable, and optimizable.
+
+**Main Agent Signature (`AgentResponse`):**
+
+```rust
+#[derive(dspy_rs::Signature)]
+pub struct AgentResponse {
+    // Inputs
+    #[input(desc = "The input to respond to - either a user message or tool execution result")]
+    pub input: String,
+
+    #[input(desc = "Compacted summary of very old messages (only present for long conversations)")]
+    pub previous_context_summary: String,
+
+    #[input(desc = "Recent conversation history including your messages and tool results")]
+    pub conversation_context: String,
+
+    #[input]
+    pub available_tools: String,
+
+    // Outputs
+    #[output(desc = "Your reasoning/thought process (think step by step)")]
+    pub reasoning: String,
+
+    #[output(desc = "Array of messages to send to the user (can be empty)")]
+    pub messages: Vec<String>,
+
+    #[output(desc = "Array of tool calls to execute (can be empty)")]
+    pub tool_calls: Vec<ToolCall>,
+}
+```
+
+**How it works:** DSRs compiles this signature + instruction into a single prompt with field markers (`[[ ## field ## ]]`). The LLM outputs structured text that gets parsed back into typed Rust structs via BAML.
+
+<details>
+<summary><strong>Example: Compiled Prompt → LLM Response</strong></summary>
+
+When Sage processes a message, DSRs generates a prompt like this:
+
+```
+Your input fields are:
+1. `input` (string): The input to respond to - either a user message or tool execution result
+2. `previous_context_summary` (string): Compacted summary of very old messages
+3. `conversation_context` (string): Recent conversation history
+4. `available_tools` (string)
+
+Your output fields are:
+1. `reasoning` (string): Your reasoning/thought process
+2. `messages` (string[]): Array of messages to send to the user
+3. `tool_calls` (ToolCall[]): Array of tool calls to execute
+
+[[ ## input ## ]]
+What's the weather like in Austin today?
+
+[[ ## previous_context_summary ## ]]
+
+[[ ## conversation_context ## ]]
+Current time: 02/01/2026 10:30:00 (Sunday) (America/Chicago)
+
+<memory_blocks>
+<persona>
+I am Sage, a helpful AI assistant communicating via Signal.
+</persona>
+<human>
+Name: Alex
+Location: Austin, TX
+Preferences: Prefers concise responses
+</human>
+</memory_blocks>
+
+Recent conversation:
+[user @ 01/31/2026 18:45:00]: hey sage, can you help me with something tomorrow?
+[assistant @ 01/31/2026 18:45:12]: Of course! Just let me know what you need.
+...
+
+[[ ## available_tools ## ]]
+Available tools:
+web_search:
+  Description: Search the web with AI summaries
+  Args: {"query": "search query", "location": "city for local results"}
+...
+
+[[ ## reasoning ## ]]
+[[ ## messages ## ]]
+[[ ## tool_calls ## ]]
+[[ ## completed ## ]]
+```
+
+The LLM responds with structured output:
+
+```
+[[ ## reasoning ## ]]
+Alex is asking about weather in Austin. I should use web_search with their location
+to get current conditions. I'll keep my response concise per their preferences.
+
+[[ ## messages ## ]]
+["Let me check the current weather for you."]
+
+[[ ## tool_calls ## ]]
+[{"name": "web_search", "args": {"query": "weather Austin TX today", "location": "Austin, TX"}}]
+
+[[ ## completed ## ]]
+```
+
+DSRs parses this back into a typed `AgentResponse` struct that Sage uses to execute tools and send messages.
+
+</details>
+
+**Other signatures in the codebase:**
+- `SummarizeConversation` - Compacts old messages when context window fills
+- `CorrectionResponse` - Fixes malformed LLM outputs (self-healing)
+
 ## Stack
 
 | Component | Choice | Why |
