@@ -264,8 +264,8 @@ impl Tool for ListSchedulesTool {
                 let mut output = format!("Found {} scheduled task(s):\n\n", tasks.len());
 
                 for task in tasks {
-                    let schedule_type = if task.cron_expression.is_some() {
-                        format!("recurring ({})", task.cron_expression.as_ref().unwrap())
+                    let schedule_type = if let Some(cron) = &task.cron_expression {
+                        format!("recurring ({})", cron)
                     } else {
                         "one-off".to_string()
                     };
