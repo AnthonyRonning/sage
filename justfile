@@ -212,3 +212,18 @@ nuke:
     else
         echo "Aborted."
     fi
+
+# =============================================================================
+# Development Setup
+# =============================================================================
+
+# Set up git hooks for pre-commit checks
+setup-hooks:
+    git config core.hooksPath .githooks
+    @echo "✅ Git hooks configured. Pre-commit will run fmt, clippy, and tests."
+
+# Run all checks (same as pre-commit)
+check:
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo test --all-features

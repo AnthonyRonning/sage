@@ -1,4 +1,12 @@
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_mut,
+    redundant_imports,
+    clippy::type_complexity,
+    clippy::too_many_arguments
+)]
 
 //! Sage Tools - capabilities that Sage can use
 //!

@@ -1,4 +1,15 @@
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_mut,
+    redundant_imports,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::single_component_path_imports,
+    clippy::trim_split_whitespace,
+    clippy::manual_find
+)]
 
 use anyhow::Result;
 use std::sync::Arc;

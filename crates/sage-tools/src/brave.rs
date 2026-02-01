@@ -573,11 +573,9 @@ impl RichResult {
     }
 
     fn format_calculator(&self) -> Option<String> {
-        if let Some(result) = self.data.get("result") {
-            Some(format!("**Calculator:** {}", result))
-        } else {
-            None
-        }
+        self.data
+            .get("result")
+            .map(|result| format!("**Calculator:** {}", result))
     }
 
     fn format_unit_conversion(&self) -> Option<String> {

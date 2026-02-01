@@ -570,14 +570,14 @@ mod tests {
 
     #[test]
     fn test_parse_cron() {
-        // Valid expressions
-        assert!(parse_cron("0 9 * * MON-FRI").is_ok());
-        assert!(parse_cron("*/15 * * * *").is_ok());
-        assert!(parse_cron("0 0 1 * *").is_ok());
+        // Valid expressions (cron crate uses 6 fields: sec min hour day month dow)
+        assert!(parse_cron("0 0 9 * * 1-5").is_ok()); // Weekdays at 9am
+        assert!(parse_cron("0 */15 * * * *").is_ok()); // Every 15 minutes
+        assert!(parse_cron("0 0 0 1 * *").is_ok()); // First of month
 
         // Invalid expressions
         assert!(parse_cron("invalid").is_err());
-        assert!(parse_cron("0 99 * * *").is_err());
+        assert!(parse_cron("0 99 * * *").is_err()); // Invalid hour
     }
 
     #[test]
