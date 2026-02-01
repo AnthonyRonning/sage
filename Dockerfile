@@ -137,6 +137,14 @@ ENV MAPLE_API_URL=http://host.docker.internal:8089/v1
 ENV SIGNAL_CLI_HOST=signal-cli
 ENV SIGNAL_CLI_PORT=7583
 ENV SAGE_WORKSPACE=/workspace
+ENV HEALTH_PORT=8080
+
+# Expose health check port
+EXPOSE 8080
+
+# Health check using curl
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Run sage
 CMD ["/app/sage"]

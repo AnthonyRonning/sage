@@ -62,8 +62,16 @@ services:
         condition: service_healthy
       signal-cli:
         condition: service_healthy
+    ports:
+      - "8080:8080"  # Health check port
     volumes:
       - ${SAGE_WORKSPACE:-~/.sage/workspace}:/workspace:rw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
       # Database
       - DATABASE_URL=postgres://sage:sage@postgres:5432/sage

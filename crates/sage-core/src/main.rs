@@ -1,4 +1,6 @@
 use anyhow::Result;
+use axum::{routing::get, Json, Router};
+use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info, warn};
@@ -19,6 +21,21 @@ mod storage;
 use agent_manager::{AgentManager, ContextType};
 use sage_agent::{SageAgent, Tool, ToolResult};
 use signal::{run_receive_loop, run_receive_loop_tcp, IncomingMessage, SignalClient};
+
+/// Health check response
+#[derive(Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    version: &'static str,
+}
+
+/// Health check endpoint - returns 200 OK when the service is running
+async fn health_check() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "healthy",
+        version: env!("CARGO_PKG_VERSION"),
+    })
+}
 
 /// Done tool - signals the agent is finished and doesn't need to send another message
 pub struct DoneTool;
@@ -223,6 +240,20 @@ async fn main() -> Result<()> {
     }
 
     info!("🌿 Sage is awake and listening on Signal!");
+
+    // Start HTTP health check server
+    let health_port: u16 = std::env::var("HEALTH_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8080);
+    let health_router = Router::new().route("/health", get(health_check));
+    let health_listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", health_port)).await?;
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(health_listener, health_router).await {
+            error!("Health check server error: {}", e);
+        }
+    });
+    info!("Health check server listening on port {}", health_port);
 
     // Start background scheduler
     let mut scheduler_rx = scheduler::spawn_scheduler(scheduler_db.clone(), 30);
