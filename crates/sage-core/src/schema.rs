@@ -1,9 +1,6 @@
 // @generated automatically by Diesel CLI.
 // Note: Some types manually adjusted for pgvector and UUID support
 
-use diesel::sql_types::*;
-use pgvector::sql_types::Vector;
-
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::Vector;

@@ -3,6 +3,8 @@
 //! Shared embedding generation for all memory tiers.
 //! Uses Maple API with nomic-embed-text model (768 dimensions).
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use tracing::warn;
 

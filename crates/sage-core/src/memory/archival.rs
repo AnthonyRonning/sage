@@ -2,6 +2,11 @@
 //!
 //! Agent-created long-term memories stored with embeddings for semantic search.
 //! Uses pgvector for efficient similarity queries.
+//!
+//! Note: This is an in-memory implementation kept for reference.
+//! The production implementation is in archival_new.rs using PostgreSQL.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};

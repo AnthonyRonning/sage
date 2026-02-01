@@ -3,6 +3,8 @@
 //! Full conversation history stored in PostgreSQL with embeddings.
 //! Supports both keyword and semantic search via pgvector.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

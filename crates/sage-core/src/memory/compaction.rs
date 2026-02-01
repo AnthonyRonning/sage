@@ -3,6 +3,8 @@
 //! Summarizes old messages when context window approaches its limit.
 //! Uses DSRs signature for summarization to enable GEPA optimization.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

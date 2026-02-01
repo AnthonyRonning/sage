@@ -3,6 +3,8 @@
 //! Agent-created long-term memories stored with embeddings for semantic search.
 //! Uses PostgreSQL with pgvector for persistence and efficient similarity queries.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

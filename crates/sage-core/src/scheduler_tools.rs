@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::sage_agent::{Tool, ToolResult};
 use crate::scheduler::{
     is_cron_expression, next_cron_time, parse_cron, parse_datetime, MessagePayload, SchedulerDb,
-    TaskPayload, TaskStatus, TaskType, ToolCallPayload,
+    TaskPayload, TaskType, ToolCallPayload,
 };
 
 // ============================================================================

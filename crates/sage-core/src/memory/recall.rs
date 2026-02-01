@@ -2,6 +2,11 @@
 //!
 //! Provides searchable access to the full conversation history.
 //! Supports both keyword matching and semantic search via embeddings.
+//!
+//! Note: This is an in-memory implementation kept for reference.
+//! The production implementation is in recall_new.rs using PostgreSQL.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};

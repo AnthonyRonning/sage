@@ -50,12 +50,10 @@ impl ShellTool {
     /// Check if a command contains blocked patterns
     fn is_blocked(&self, command: &str) -> Option<&'static str> {
         let lower = command.to_lowercase();
-        for pattern in BLOCKED_PATTERNS {
-            if lower.contains(pattern) {
-                return Some(pattern);
-            }
-        }
-        None
+        BLOCKED_PATTERNS
+            .iter()
+            .find(|&pattern| lower.contains(pattern))
+            .copied()
     }
 
     /// Truncate output if too long (handles UTF-8 boundaries safely)

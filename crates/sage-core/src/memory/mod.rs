@@ -20,14 +20,14 @@ mod recall;
 mod recall_new;
 mod tools;
 
-pub use block::{Block, BlockManager, DEFAULT_BLOCK_CHAR_LIMIT};
+pub use block::BlockManager;
 // Use new database-backed managers
-pub use archival_new::{ArchivalManager, ArchivalSearchResult, Passage};
+pub use archival_new::ArchivalManager;
 pub use compaction::{CompactionManager, SummaryResult};
 pub use context::ContextManager;
-pub use db::{preference_keys, MemoryDb, PreferenceDb};
+pub use db::{preference_keys, MemoryDb};
 pub use embedding::EmbeddingService;
-pub use recall_new::{RecallManager, RecallMessage, RecallSearchResult};
+pub use recall_new::RecallManager;
 pub use tools::{
     ArchivalInsertTool, ArchivalSearchTool, ConversationSearchTool, MemoryAppendTool,
     MemoryInsertTool, MemoryReplaceTool, SetPreferenceTool,
@@ -49,10 +49,12 @@ pub const DEFAULT_HUMAN_DESCRIPTION: &str = "The human block: Stores key details
 /// Constants for context management
 /// Note: Kimi K2 supports 256k tokens, but using 100k for faster compaction testing
 pub const DEFAULT_CONTEXT_WINDOW: usize = 100_000;
+#[allow(dead_code)]
 pub const COMPACTION_THRESHOLD: f32 = 0.80; // 80% threshold (80k tokens triggers compaction)
 pub const MIN_MESSAGES_IN_CONTEXT: usize = 20; // Always show at least 20 messages after compaction
 
 /// Main memory manager that coordinates all memory tiers
+#[allow(dead_code)]
 pub struct MemoryManager {
     agent_id: Uuid,
     db: MemoryDb,
@@ -66,6 +68,7 @@ pub struct MemoryManager {
     compaction_lock: Arc<TokioMutex<()>>,
 }
 
+#[allow(dead_code)]
 impl MemoryManager {
     /// Create a new memory manager for an agent
     pub async fn new(

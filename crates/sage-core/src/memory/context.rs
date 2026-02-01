@@ -3,6 +3,8 @@
 //! Manages the in-context message buffer and token counting.
 //! The `message_ids` list represents which messages are visible to the LLM.
 
+#![allow(dead_code)]
+
 use uuid::Uuid;
 
 /// Default context window size for Kimi K2
@@ -127,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_context_manager() {
-        let mut ctx = ContextManager::new(100_000);
+        let ctx = ContextManager::new(100_000);
 
         assert_eq!(ctx.max_tokens(), 100_000);
         assert_eq!(ctx.threshold_tokens(), 80_000);
