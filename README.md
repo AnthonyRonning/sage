@@ -87,12 +87,51 @@ The codebase is structured around [DSRs](https://github.com/krypticmouse/DSRs) s
 
 ### Prerequisites
 
-- [Nix](https://nixos.org/download.html) with flakes enabled
 - [Podman](https://podman.io/) or Docker
 - signal-cli registered with a phone number
 - Maple API access (or compatible OpenAI endpoint)
 
-### Setup
+### Option 1: Docker (Recommended)
+
+Pre-built images are available for `linux/amd64` and `linux/arm64`:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/anthonyronning/sage:latest
+
+# Clone for docker-compose and configs
+git clone https://github.com/AnthonyRonning/sage.git
+cd sage
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Initialize signal-cli data volume (requires existing signal-cli registration)
+just signal-init
+
+# Start all services (postgres, signal-cli, sage)
+docker compose up -d
+```
+
+Or use the image directly in your own compose setup:
+
+```yaml
+services:
+  sage:
+    image: ghcr.io/anthonyronning/sage:latest
+    environment:
+      - DATABASE_URL=postgres://sage:sage@postgres:5432/sage
+      - MAPLE_API_URL=https://your-maple-endpoint
+      - MAPLE_API_KEY=your-api-key
+      - SIGNAL_CLI_HOST=signal-cli
+      - SIGNAL_CLI_PORT=7583
+      - SIGNAL_PHONE_NUMBER=+1234567890
+```
+
+### Option 2: Build from Source
+
+Requires [Nix](https://nixos.org/download.html) with flakes enabled:
 
 ```bash
 git clone https://github.com/AnthonyRonning/sage.git
