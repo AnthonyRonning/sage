@@ -1,12 +1,14 @@
 # Sage V2 - Rust-based AI agent
-# Multi-stage build for smaller final image
+# Multi-stage build with cargo-chef for optimal layer caching
 
-# Stage 1: Build
-FROM docker.io/rust:1.83-bookworm AS builder
+# Stage 1: Chef - Install cargo-chef
+FROM docker.io/rust:1.83-bookworm AS chef
 
-# Install Rust nightly (required for edition2024 in DSRs)
+# Install Rust nightly first (required for edition2024 in cargo-chef deps)
 RUN rustup toolchain install nightly \
     && rustup default nightly
+
+RUN cargo install cargo-chef
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -17,18 +19,28 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy manifests
-COPY Cargo.toml Cargo.lock ./
-COPY crates/sage-core/Cargo.toml crates/sage-core/
-COPY crates/sage-tools/Cargo.toml crates/sage-tools/
+# Stage 2: Planner - Analyze dependencies
+FROM chef AS planner
 
-# Copy source
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-# Build the actual binary
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 3: Builder - Build dependencies (cached) then source
+FROM chef AS builder
+
+# Copy recipe and build dependencies only (this layer is cached!)
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Now copy source and build (only recompiles our code)
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+
 RUN cargo build --release
 
-# Stage 2: Runtime
+# Stage 4: Runtime
 FROM docker.io/debian:bookworm-slim
 
 # Install runtime dependencies and comprehensive CLI toolset
