@@ -2,6 +2,8 @@
 //!
 //! Provides Diesel-based CRUD operations for blocks, passages, and agents.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use diesel::pg::PgConnection;
@@ -9,7 +11,6 @@ use diesel::prelude::*;
 use diesel::sql_types::{Array, Double, Text, Timestamptz, Uuid as DieselUuid};
 
 use std::sync::{Arc, Mutex};
-use tracing::info;
 use uuid::Uuid;
 
 use crate::schema::{agents, blocks, passages, summaries, user_preferences};
@@ -283,6 +284,7 @@ impl PassageDb {
         );
 
         // Execute raw query and parse results
+        #[allow(clippy::type_complexity)]
         let results: Vec<(Uuid, String, String, Vec<String>, DateTime<Utc>, f64)> =
             diesel::sql_query(&query)
                 .load::<PassageSearchRow>(&mut *conn)?
@@ -506,6 +508,7 @@ impl MessageDb {
     }
 
     /// Insert a message with embedding
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_message(
         &self,
         agent_id: Uuid,

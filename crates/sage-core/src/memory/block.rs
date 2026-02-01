@@ -5,6 +5,8 @@
 //!
 //! Blocks are persisted to PostgreSQL and loaded on startup.
 
+#![allow(dead_code)]
+
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;

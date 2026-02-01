@@ -116,6 +116,7 @@ pub enum TaskPayload {
 
 /// A scheduled task
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ScheduledTask {
     pub id: Uuid,
     pub agent_id: Uuid,
@@ -200,6 +201,7 @@ pub struct SchedulerDb {
     conn: Arc<Mutex<PgConnection>>,
 }
 
+#[allow(dead_code)]
 impl SchedulerDb {
     /// Create a new SchedulerDb with a shared connection
     pub fn new(conn: Arc<Mutex<PgConnection>>) -> Self {
@@ -215,6 +217,7 @@ impl SchedulerDb {
     }
 
     /// Create a new scheduled task
+    #[allow(clippy::too_many_arguments)]
     pub fn create_task(
         &self,
         agent_id: Uuid,
@@ -477,7 +480,7 @@ pub fn parse_datetime(s: &str) -> Result<DateTime<Utc>> {
 /// Determine if a string is a cron expression or datetime
 pub fn is_cron_expression(s: &str) -> bool {
     // Cron expressions have 5-7 space-separated fields
-    let parts: Vec<&str> = s.trim().split_whitespace().collect();
+    let parts: Vec<&str> = s.split_whitespace().collect();
     parts.len() >= 5 && parts.len() <= 7
 }
 // ============================================================================
@@ -539,6 +542,7 @@ pub fn spawn_scheduler(
 }
 
 /// Complete a task after successful execution
+#[allow(dead_code)]
 pub fn complete_task(scheduler_db: &SchedulerDb, task: &ScheduledTask) -> Result<()> {
     if let Some(ref cron_expr) = task.cron_expression {
         // Recurring task - calculate next run time
@@ -558,6 +562,7 @@ pub fn complete_task(scheduler_db: &SchedulerDb, task: &ScheduledTask) -> Result
 }
 
 /// Mark a task as failed
+#[allow(dead_code)]
 pub fn fail_task(scheduler_db: &SchedulerDb, task: &ScheduledTask, error: &str) -> Result<()> {
     scheduler_db.mark_failed(task.id, error)?;
     tracing::error!("Task '{}' failed: {}", task.description, error);

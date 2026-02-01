@@ -45,6 +45,7 @@ pub struct MessageStore {
     conn: Mutex<PgConnection>,
 }
 
+#[allow(dead_code)]
 impl MessageStore {
     pub fn new(database_url: &str) -> Result<Self> {
         let conn = PgConnection::establish(database_url)?;

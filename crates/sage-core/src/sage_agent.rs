@@ -11,11 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::memory::{BlockManager, MemoryManager};
-
-// baml_bridge is needed for the BamlType derive macro expansion
-#[allow(unused_imports)]
-use baml_bridge;
+use crate::memory::MemoryManager;
 
 /// A tool call requested by the agent
 #[derive(Clone, Debug, Default, BamlType)]
@@ -276,6 +272,7 @@ pub struct ExecutedTool {
 
 /// Result of a single agent step
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct StepResult {
     pub messages: Vec<String>,
     pub tool_calls: Vec<ToolCall>,
@@ -283,6 +280,7 @@ pub struct StepResult {
     pub done: bool,
 }
 
+#[allow(dead_code)]
 impl Message {
     pub fn user(content: impl Into<String>) -> Self {
         Self {
@@ -307,6 +305,7 @@ impl Message {
 }
 
 /// The Sage agent using DSRs
+#[allow(dead_code)]
 pub struct SageAgent {
     agent_id: Uuid,
     tools: ToolRegistry,
@@ -319,6 +318,7 @@ pub struct SageAgent {
     max_steps: usize,
 }
 
+#[allow(dead_code)]
 impl SageAgent {
     /// Create a new agent with tools and memory
     pub fn new(tools: ToolRegistry, memory: MemoryManager) -> Self {

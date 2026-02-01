@@ -13,12 +13,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::config::Config;
 use crate::memory::MemoryManager;
-use crate::sage_agent::{SageAgent, Tool, ToolRegistry};
+use crate::sage_agent::{SageAgent, ToolRegistry};
 use crate::scheduler::SchedulerDb;
 use crate::scheduler_tools;
 use crate::schema::chat_contexts;
@@ -27,6 +27,7 @@ use crate::shell_tool::ShellTool;
 /// Row from chat_contexts table
 #[derive(Queryable, Selectable, Debug, Clone)]
 #[diesel(table_name = chat_contexts)]
+#[allow(dead_code)]
 pub struct ChatContext {
     pub id: Uuid,
     pub signal_identifier: String,
@@ -47,6 +48,7 @@ struct NewChatContext<'a> {
 
 /// Context type for chat
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum ContextType {
     Direct,
     Group,
@@ -62,6 +64,7 @@ impl ContextType {
 }
 
 /// Cached agent with its tools and metadata
+#[allow(dead_code)]
 struct CachedAgent {
     agent: Arc<Mutex<SageAgent>>,
     context: ChatContext,
@@ -287,6 +290,7 @@ impl AgentManager {
     }
 
     /// Get agent_id for a signal identifier (if exists)
+    #[allow(dead_code)]
     pub fn get_agent_id(&self, signal_identifier: &str) -> Result<Option<Uuid>> {
         let mut conn = self
             .db_conn
