@@ -11,6 +11,7 @@ use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -464,6 +465,11 @@ pub async fn run_receive_loop_tcp(
     tokio::task::spawn_blocking(move || {
         // Create a separate connection for receiving
         let stream = TcpStream::connect((&host[..], port))?;
+
+        // Periodically wake up so we can detect a dead/stuck subscription and keep the socket active.
+        // (Errors on keepalive will cause the loop to end so the supervisor can reconnect.)
+        stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+
         let mut reader = BufReader::new(stream.try_clone()?);
         let mut writer = BufWriter::new(stream);
 
@@ -481,6 +487,12 @@ pub async fn run_receive_loop_tcp(
         info!("Subscribed to messages on TCP connection");
 
         let mut line = String::new();
+        let mut keepalive_id: u64 = 2;
+        let keepalive_every = Duration::from_secs(5 * 60);
+        let mut last_activity = Instant::now();
+        let mut last_keepalive_sent = Instant::now();
+        let mut awaiting_keepalive_response = false;
+
         loop {
             line.clear();
             match reader.read_line(&mut line) {
@@ -490,6 +502,9 @@ pub async fn run_receive_loop_tcp(
                 }
                 Ok(_) => {
                     debug!("Received from signal-cli: {}", line.trim());
+
+                    last_activity = Instant::now();
+                    awaiting_keepalive_response = false;
 
                     if let Some(msg) = parse_incoming_message(&line) {
                         // Find valid UTF-8 boundary for preview
@@ -514,8 +529,50 @@ pub async fn run_receive_loop_tcp(
                     }
                 }
                 Err(e) => {
-                    error!("Error reading from signal-cli: {}", e);
-                    break;
+                    match e.kind() {
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                            // No data arrived within the read timeout.
+
+                            if awaiting_keepalive_response {
+                                warn!("signal-cli keepalive timed out (no response); reconnecting");
+                                break;
+                            }
+
+                            let now = Instant::now();
+                            if now.duration_since(last_activity) < keepalive_every {
+                                continue;
+                            }
+                            if now.duration_since(last_keepalive_sent) < keepalive_every {
+                                continue;
+                            }
+
+                            // Send a lightweight keepalive request. If this fails, drop the
+                            // connection so the supervisor can reconnect + resubscribe.
+                            let keepalive = json!({
+                                "jsonrpc": "2.0",
+                                "method": "listAccounts",
+                                "id": keepalive_id,
+                            });
+                            keepalive_id = keepalive_id.saturating_add(1);
+
+                            let request_str = serde_json::to_string(&keepalive)? + "\n";
+                            debug!("Sending signal-cli TCP keepalive");
+                            if let Err(write_err) = writer
+                                .write_all(request_str.as_bytes())
+                                .and_then(|_| writer.flush())
+                            {
+                                warn!("signal-cli keepalive write failed: {}", write_err);
+                                break;
+                            }
+
+                            last_keepalive_sent = now;
+                            awaiting_keepalive_response = true;
+                        }
+                        _ => {
+                            error!("Error reading from signal-cli: {}", e);
+                            break;
+                        }
+                    }
                 }
             }
         }

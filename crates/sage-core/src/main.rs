@@ -214,8 +214,31 @@ async fn main() -> Result<()> {
         let host = host.clone();
         let port = config.signal_cli_port;
         let account = signal_phone.clone();
-        let receive_handle =
-            tokio::spawn(async move { run_receive_loop_tcp(&host, port, &account, tx).await });
+        // Supervise the receive loop: if the TCP subscription drops, reconnect + resubscribe.
+        let receive_handle = tokio::spawn(async move {
+            let mut backoff = std::time::Duration::from_millis(250);
+            let backoff_max = std::time::Duration::from_secs(60);
+
+            loop {
+                match run_receive_loop_tcp(&host, port, &account, tx.clone()).await {
+                    Ok(()) => {
+                        warn!(
+                            "Signal TCP receive loop exited unexpectedly; restarting in {:?}",
+                            backoff
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Signal TCP receive loop error; restarting in {:?}: {}",
+                            backoff, e
+                        );
+                    }
+                }
+
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(backoff_max);
+            }
+        });
 
         (signal_client, receive_handle)
     } else {
@@ -259,14 +282,13 @@ async fn main() -> Result<()> {
     let mut scheduler_rx = scheduler::spawn_scheduler(scheduler_db.clone(), 30);
     info!("Background scheduler started (polling every 30s)");
 
-    // Signal health check interval (every 4 hours)
+    // Signal health check interval (every 60 minutes)
     // This refreshes prekeys to prevent silent send failures
-    let mut signal_health_interval =
-        tokio::time::interval(std::time::Duration::from_secs(4 * 60 * 60));
+    let mut signal_health_interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
     signal_health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Skip the first immediate tick
     signal_health_interval.tick().await;
-    info!("Signal health check scheduled (every 4 hours)");
+    info!("Signal health check scheduled (every 60 minutes)");
 
     // Main event loop
     loop {

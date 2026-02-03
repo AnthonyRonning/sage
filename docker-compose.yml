@@ -45,11 +45,14 @@ services:
     tmpfs:
       - /tmp:exec
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "7583"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      # Avoid connection churn / broken-pipe noise by issuing a real JSON-RPC request.
+      test:
+        - CMD-SHELL
+        - 'echo "{\"jsonrpc\":\"2.0\",\"method\":\"listAccounts\",\"id\":1}" | timeout 5 nc localhost 7583 | grep -q result'
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Sage V2 - Rust AI agent
   sage:
