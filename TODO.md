@@ -85,7 +85,7 @@ just stop           # Stop containers
 |----------|---------|
 | `MAPLE_API_URL` | LLM endpoint |
 | `MAPLE_API_KEY` | API key |
-| `MAPLE_MODEL` | Model name (kimi-k2-thinking) |
+| `MAPLE_MODEL` | Model name (kimi-k2-5) |
 | `MAPLE_EMBEDDING_MODEL` | Embedding model |
 | `SIGNAL_PHONE_NUMBER` | Sage's phone number |
 | `SIGNAL_ALLOWED_USERS` | Comma-separated UUIDs (or * for all) |

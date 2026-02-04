@@ -45,6 +45,9 @@
           pkgs.rust-analyzer
           pkgs.clippy
           pkgs.rustfmt
+
+          # C toolchain (provides `cc` linker for crates with native/build scripts)
+          pkgs.stdenv.cc
           
           # Build dependencies for Rust crates
           pkgs.pkg-config

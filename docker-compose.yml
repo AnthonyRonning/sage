@@ -82,7 +82,7 @@ services:
       # LLM Backend (Maple)
       - MAPLE_API_URL=${MAPLE_API_URL:-http://host.docker.internal:8089/v1}
       - MAPLE_API_KEY=${MAPLE_API_KEY}
-      - MAPLE_MODEL=${MAPLE_MODEL:-kimi-k2-thinking}
+      - MAPLE_MODEL=${MAPLE_MODEL:-kimi-k2-5}
       - MAPLE_EMBEDDING_MODEL=${MAPLE_EMBEDDING_MODEL:-maple/nomic-embed-text}
       
       # Signal (TCP mode to signal-cli container)

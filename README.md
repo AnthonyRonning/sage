@@ -334,7 +334,7 @@ just start        # Start all services
 # Required
 MAPLE_API_URL=https://your-maple-endpoint
 MAPLE_API_KEY=your-api-key
-MAPLE_MODEL=maple/kimi-k2-thinking
+MAPLE_MODEL=maple/kimi-k2-5
 SIGNAL_PHONE_NUMBER=+1234567890
 
 # Optional
