@@ -101,7 +101,9 @@ RULES:
 OUTPUT FORMAT:
 - reasoning: Explain what was wrong and how you fixed it
 - messages: ALL extracted messages in ONE array
-- tool_calls: ALL extracted tool calls in ONE array (or [] if none intended)"#;
+- tool_calls: ALL extracted tool calls in ONE array (or [] if none intended)
+
+CRITICAL: Do NOT include <think> or </think> tags - use ONLY the [[ ## field ## ]] format."#;
 
 /// Default instruction for the agent (can be optimized by GEPA)
 /// Note: Memory blocks are injected separately via memory.compile()
@@ -167,7 +169,10 @@ Each field appears exactly ONCE. Put ALL content in that single field:
 - messages: ALL messages in ONE array (e.g., ["msg1", "msg2", "msg3"])
 - tool_calls: ALL tool calls in ONE array
 
-Do NOT repeat field tags. Wrong: multiple [[ ## messages ## ]] blocks. Right: one messages array with all items."#;
+CRITICAL FORMAT RULES:
+- Do NOT repeat field tags. Wrong: multiple [[ ## messages ## ]] blocks. Right: one messages array with all items.
+- Do NOT include <think> or </think> tags in your output - use ONLY the [[ ## field ## ]] format specified above.
+- Keep your output clean and strictly follow the field delimiters."#;
 
 /// Result of executing a tool
 #[derive(Clone, Debug)]
