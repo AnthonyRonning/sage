@@ -27,6 +27,9 @@ Thumbs.db
 *.log
 logs/
 
+# Bug reproduction files (contain sensitive context)
+docs/bugs/
+
 # Credentials (NEVER commit these)
 *.pem
 *.key
