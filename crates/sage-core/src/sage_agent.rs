@@ -740,41 +740,82 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
             available_tools: available_tools.clone(),
         };
 
-        // Get typed response from LLM with retry logic
-        let response = match predictor.call(input).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("LLM call failed, attempting correction: {:?}", e);
+        // Get typed response from LLM with retry logic (up to 3 attempts)
+        const MAX_LLM_RETRIES: u32 = 3;
+        let mut last_error: Option<dspy_rs::PredictError> = None;
+        let mut response: Option<AgentResponse> = None;
 
-                // Extract raw_response directly from PredictError::Parse
-                let (raw_response, error_message) = match &e {
-                    dspy_rs::PredictError::Parse {
+        for attempt in 1..=MAX_LLM_RETRIES {
+            match predictor.call(input.clone()).await {
+                Ok(r) => {
+                    response = Some(r);
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "LLM call failed (attempt {}/{}): {:?}",
+                        attempt,
+                        MAX_LLM_RETRIES,
+                        e
+                    );
+
+                    // For parse errors, try correction instead of simple retry
+                    if let dspy_rs::PredictError::Parse {
                         raw_response,
                         source,
                         ..
-                    } => (raw_response.clone(), format!("Parse error: {}", source)),
-                    other => {
-                        tracing::error!("Non-parse error, cannot correct: {:?}", other);
-                        return Err(anyhow::anyhow!("LLM error: {}", other));
+                    } = &e
+                    {
+                        let error_message = format!("Parse error: {}", source);
+                        match self
+                            .attempt_correction(
+                                &input_content,
+                                &available_tools,
+                                raw_response,
+                                &error_message,
+                            )
+                            .await
+                        {
+                            Ok(corrected) => {
+                                response = Some(corrected);
+                                break;
+                            }
+                            Err(correction_err) => {
+                                tracing::warn!(
+                                    "Correction failed (attempt {}/{}): {:?}",
+                                    attempt,
+                                    MAX_LLM_RETRIES,
+                                    correction_err
+                                );
+                            }
+                        }
                     }
-                };
 
-                // Try to correct the malformed response
-                match self
-                    .attempt_correction(
-                        &input_content,
-                        &available_tools,
-                        &raw_response,
-                        &error_message,
-                    )
-                    .await
-                {
-                    Ok(corrected) => corrected,
-                    Err(correction_err) => {
-                        tracing::error!("Correction also failed: {:?}", correction_err);
-                        return Err(anyhow::anyhow!("Parse error and correction failed: {}", e));
+                    last_error = Some(e);
+
+                    // Add a small delay before retry (except on last attempt)
+                    if attempt < MAX_LLM_RETRIES {
+                        tracing::info!("Retrying LLM call in 1 second...");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                 }
+            }
+        }
+
+        let response = match response {
+            Some(r) => r,
+            None => {
+                let err = last_error.unwrap();
+                tracing::error!(
+                    "LLM call failed after {} attempts: {:?}",
+                    MAX_LLM_RETRIES,
+                    err
+                );
+                return Err(anyhow::anyhow!(
+                    "LLM error after {} retries: {}",
+                    MAX_LLM_RETRIES,
+                    err
+                ));
             }
         };
 
