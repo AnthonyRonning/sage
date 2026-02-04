@@ -44,6 +44,12 @@ services:
       - signal-cli-data:/var/lib/signal-cli
     tmpfs:
       - /tmp:exec
+    # TCP keepalive settings to detect dead connections faster and prevent NAT timeout drops
+    # These help maintain long-running connections in Docker's bridge network
+    sysctls:
+      - net.ipv4.tcp_keepalive_time=30    # Start probing after 30s idle (default 7200)
+      - net.ipv4.tcp_keepalive_intvl=10   # Probe every 10s (default 75)
+      - net.ipv4.tcp_keepalive_probes=3   # Give up after 3 failed probes (default 9)
     healthcheck:
       # Avoid connection churn / broken-pipe noise by issuing a real JSON-RPC request.
       test:
@@ -53,6 +59,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
 
   # Sage V2 - Rust AI agent
   sage:

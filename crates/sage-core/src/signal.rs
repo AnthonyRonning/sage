@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+use socket2::{SockRef, TcpKeepalive};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
@@ -451,6 +452,25 @@ pub async fn run_receive_loop(
     Ok(())
 }
 
+/// Configure TCP keepalive on a socket to detect dead connections faster
+fn configure_tcp_keepalive(stream: &TcpStream) -> Result<()> {
+    let sock_ref = SockRef::from(stream);
+
+    // Enable TCP keepalive with aggressive settings for faster dead connection detection
+    let keepalive = TcpKeepalive::new()
+        .with_time(Duration::from_secs(30)) // Start probing after 30s idle
+        .with_interval(Duration::from_secs(10)); // Probe every 10s
+
+    // Note: with_retries() is not available on all platforms, OS default (usually 9) is fine
+
+    sock_ref
+        .set_tcp_keepalive(&keepalive)
+        .context("Failed to set TCP keepalive")?;
+
+    debug!("TCP keepalive configured: time=30s, interval=10s");
+    Ok(())
+}
+
 /// Run the message receive loop for TCP mode
 /// This needs the TcpStream directly since we can't easily share the BufReader
 pub async fn run_receive_loop_tcp(
@@ -465,6 +485,11 @@ pub async fn run_receive_loop_tcp(
     tokio::task::spawn_blocking(move || {
         // Create a separate connection for receiving
         let stream = TcpStream::connect((&host[..], port))?;
+
+        // Configure TCP-level keepalive for faster dead connection detection
+        if let Err(e) = configure_tcp_keepalive(&stream) {
+            warn!("Failed to configure TCP keepalive (continuing anyway): {}", e);
+        }
 
         // Periodically wake up so we can detect a dead/stuck subscription and keep the socket active.
         // (Errors on keepalive will cause the loop to end so the supervisor can reconnect.)
@@ -488,16 +513,41 @@ pub async fn run_receive_loop_tcp(
 
         let mut line = String::new();
         let mut keepalive_id: u64 = 2;
-        let keepalive_every = Duration::from_secs(5 * 60);
+        // Reduced from 5 minutes to 30 seconds to stay under typical NAT timeouts (60-120s)
+        let keepalive_every = Duration::from_secs(30);
         let mut last_activity = Instant::now();
         let mut last_keepalive_sent = Instant::now();
         let mut awaiting_keepalive_response = false;
+        let session_start = Instant::now();
+        // Force reconnect after 24 hours to prevent degradation over very long sessions
+        let max_session_duration = Duration::from_secs(24 * 60 * 60);
+        let mut messages_received: u64 = 0;
+        let mut keepalives_sent: u64 = 0;
 
         loop {
+            // Check for forced reconnect (prevent long-term degradation)
+            if session_start.elapsed() > max_session_duration {
+                info!(
+                    "Signal TCP session reached max duration (24h); forcing reconnect. \
+                     Stats: messages={}, keepalives={}, session_duration={:?}",
+                    messages_received,
+                    keepalives_sent,
+                    session_start.elapsed()
+                );
+                break;
+            }
+
             line.clear();
             match reader.read_line(&mut line) {
                 Ok(0) => {
-                    warn!("signal-cli daemon closed connection");
+                    warn!(
+                        "signal-cli daemon closed connection. \
+                         Stats: messages={}, keepalives={}, last_activity={:?} ago, session_duration={:?}",
+                        messages_received,
+                        keepalives_sent,
+                        last_activity.elapsed(),
+                        session_start.elapsed()
+                    );
                     break;
                 }
                 Ok(_) => {
@@ -507,6 +557,7 @@ pub async fn run_receive_loop_tcp(
                     awaiting_keepalive_response = false;
 
                     if let Some(msg) = parse_incoming_message(&line) {
+                        messages_received += 1;
                         // Find valid UTF-8 boundary for preview
                         let preview_end = {
                             let max_len = 100.min(msg.message.len());
@@ -534,7 +585,14 @@ pub async fn run_receive_loop_tcp(
                             // No data arrived within the read timeout.
 
                             if awaiting_keepalive_response {
-                                warn!("signal-cli keepalive timed out (no response); reconnecting");
+                                warn!(
+                                    "signal-cli keepalive timed out (no response); reconnecting. \
+                                     Stats: messages={}, keepalives={}, last_activity={:?} ago, session_duration={:?}",
+                                    messages_received,
+                                    keepalives_sent,
+                                    last_activity.elapsed(),
+                                    session_start.elapsed()
+                                );
                                 break;
                             }
 
@@ -554,14 +612,22 @@ pub async fn run_receive_loop_tcp(
                                 "id": keepalive_id,
                             });
                             keepalive_id = keepalive_id.saturating_add(1);
+                            keepalives_sent += 1;
 
                             let request_str = serde_json::to_string(&keepalive)? + "\n";
-                            debug!("Sending signal-cli TCP keepalive");
+                            debug!("Sending signal-cli TCP keepalive #{}", keepalives_sent);
                             if let Err(write_err) = writer
                                 .write_all(request_str.as_bytes())
                                 .and_then(|_| writer.flush())
                             {
-                                warn!("signal-cli keepalive write failed: {}", write_err);
+                                warn!(
+                                    "signal-cli keepalive write failed: {}. \
+                                     Stats: messages={}, keepalives={}, session_duration={:?}",
+                                    write_err,
+                                    messages_received,
+                                    keepalives_sent,
+                                    session_start.elapsed()
+                                );
                                 break;
                             }
 
@@ -569,14 +635,28 @@ pub async fn run_receive_loop_tcp(
                             awaiting_keepalive_response = true;
                         }
                         _ => {
-                            error!("Error reading from signal-cli: {}", e);
+                            error!(
+                                "Error reading from signal-cli: {}. \
+                                 Stats: messages={}, keepalives={}, last_activity={:?} ago, session_duration={:?}",
+                                e,
+                                messages_received,
+                                keepalives_sent,
+                                last_activity.elapsed(),
+                                session_start.elapsed()
+                            );
                             break;
                         }
                     }
                 }
             }
         }
-        warn!("Signal TCP receive loop ended");
+        warn!(
+            "Signal TCP receive loop ended. \
+             Final stats: messages={}, keepalives={}, session_duration={:?}",
+            messages_received,
+            keepalives_sent,
+            session_start.elapsed()
+        );
         Ok::<_, anyhow::Error>(())
     })
     .await??;
