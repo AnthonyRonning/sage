@@ -30,6 +30,9 @@ logs/
 # Bug reproduction files (contain sensitive context)
 docs/bugs/
 
+# Prompt files (contain sensitive context)
+docs/prompts/
+
 # Credentials (NEVER commit these)
 *.pem
 *.key
