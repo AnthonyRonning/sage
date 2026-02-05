@@ -282,6 +282,27 @@
         "tool_calls": [{"name": "memory_append", "args": {"block": "human", "content": "Location: Austin, TX"}}, {"name": "archival_insert", "args": {"content": "Anthony lives in Austin, Texas.", "tags": "location,home"}}, {"name": "web_search", "args": {"query": "weather", "location": "Austin, TX"}}]
       },
       "bad_patterns": ["asking if they want weather searched", "not searching weather immediately", "only storing memory without doing the requested action", "asking for confirmation when action was already requested"]
+    },
+    {
+      "id": "casual_mention_pet_proactive_memory",
+      "category": "proactive_memory",
+      "input": "oh that's great! we were having bad weather the past few weekends. really cold. but glad to see it's better now. i may go on a walk with my dog Smokey.",
+      "current_time": "02/05/2026 18:37:31 (Thursday) UTC",
+      "persona_block": "I am Sage, a helpful AI assistant communicating via Signal. I maintain long-term memory across our conversations and strive to be friendly, concise, and genuinely helpful.",
+      "human_block": "Name: Anthony\nLocation: Austin, TX",
+      "memory_metadata": "- Memory blocks last modified: 2026-02-05 18:30:51 UTC\n- 23 messages in recall memory (use conversation_search to access)\n- 1 passages in archival memory (use archival_search to access)",
+      "previous_context_summary": "",
+      "recent_conversation": "[user @ 02/05/2026 18:30:47 UTC]: austin, that's where i live\n[assistant @ 02/05/2026 18:30:55 UTC]: Oh nice, Austin!\n[assistant @ 02/05/2026 18:30:55 UTC]: Great city. I'll remember that.\n[tool @ 02/05/2026 18:30:56 UTC]: memory_append(block=\"human\", content=\"Location: Austin, TX\") → Successfully appended.\n[tool @ 02/05/2026 18:31:38 UTC]: web_search(query=\"Austin TX current weather\") → 69°F and sunny, high 70°F, low 40°F\n[assistant @ 02/05/2026 18:31:41 UTC]: It's 69°F and sunny in Austin right now ☀️\n[assistant @ 02/05/2026 18:31:41 UTC]: High today is 70°F with a low of 40°F tonight.\n[assistant @ 02/05/2026 18:31:41 UTC]: No rain expected and humidity is pretty low at 21%. Perfect weather!\n[user @ 02/05/2026 18:37:30 UTC]: oh that's great! we were having bad weather the past few weekends. really cold. but glad to see it's better now. i may go on a walk with my dog Smokey.",
+      "is_first_time_user": false,
+      "expected_behavior": "User casually mentioned their dog's name (Smokey) in conversation. Proactively store this to both core memory and archival. Respond warmly and naturally WITHOUT announcing the memory storage.",
+      "expected_response_type": "casual_with_silent_memory",
+      "expected_tools": ["memory_append", "archival_insert"],
+      "should_store_memory": true,
+      "good_response": {
+        "messages": ["That's awesome!", "Enjoy the walk with Smokey! 🐕", "Perfect weather for it. ☀️"],
+        "tool_calls": [{"name": "memory_append", "args": {"block": "human", "content": "Has a dog named Smokey"}}, {"name": "archival_insert", "args": {"content": "Anthony has a dog named Smokey. He enjoys taking walks with Smokey when the weather is nice.", "tags": "pet,dog,Smokey"}}]
+      },
+      "bad_patterns": ["announcing memory storage", "saying 'I'll remember that'", "not storing the pet info", "asking follow-up questions about the dog instead of just noting it"]
     }
   ]
 }
