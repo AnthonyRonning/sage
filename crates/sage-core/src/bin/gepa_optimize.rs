@@ -531,7 +531,8 @@ async fn run_optimization_async() -> Result<()> {
         // Evaluate new instruction
         println!("Evaluating improved instruction...");
         configure(program_lm.clone(), ChatAdapter);
-        let (new_scores, _new_traces) = evaluate_instruction(&improved_instruction, &trainset).await;
+        let (new_scores, _new_traces) =
+            evaluate_instruction(&improved_instruction, &trainset).await;
 
         let new_candidate = GEPACandidate {
             instruction: improved_instruction,
