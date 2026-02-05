@@ -41,8 +41,8 @@ start:
         echo "Starting signal-cli..."
         podman run -d --name sage-signal-cli \
             -p 7583:7583 -v signal-cli-data:/var/lib/signal-cli --tmpfs /tmp:exec \
-            registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest \
-            -v daemon --tcp 0.0.0.0:7583 --send-read-receipts
+            registry.gitlab.com/packaging/signal-cli/signal-cli-jre:latest \
+            daemon --tcp 0.0.0.0:7583 --send-read-receipts --ignore-stories
         sleep 2
     else
         echo "signal-cli already running"
@@ -155,7 +155,7 @@ signal-init:
         docker.io/alpine:latest \
         sh -c "mkdir -p /dest/.local/share/signal-cli/data && cp -a /src/. /dest/.local/share/signal-cli/data/ && chown -R 101:101 /dest/"
     echo "Done! signal-cli data copied to volume."
-    echo "Verify with: podman run --rm -v signal-cli-data:/var/lib/signal-cli registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest listAccounts"
+    echo "Verify with: podman run --rm -v signal-cli-data:/var/lib/signal-cli registry.gitlab.com/packaging/signal-cli/signal-cli-jre:latest listAccounts"
 
 # =============================================================================
 # Development (Local)
