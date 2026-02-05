@@ -57,7 +57,7 @@ All embeddings are generated via Maple's TEE-based embedding API (nomic-embed-te
 
 ### Built for Prompt Optimization
 
-The codebase is structured around [DSRs](https://github.com/krypticmouse/DSRs) signatures, enabling future **GEPA (Genetic-Pareto) optimization** of prompts based on collected traces and feedback metrics.
+The codebase is structured around [DSRs](https://github.com/krypticmouse/DSRs) signatures, enabling **GEPA (Genetic-Pareto) optimization** of prompts. Sage includes a working GEPA system where Claude analyzes test failures and proposes instruction improvements, which are then evaluated against Kimi. See the [GEPA section](#gepa-prompt-optimization) below.
 
 ### DSRs Signature Architecture
 
@@ -383,12 +383,58 @@ SIGNAL_ALLOWED_USERS=*        # Or comma-separated UUIDs
 - Web search, shell commands, scheduling
 - Auto-reconnect on Signal connection drops
 - Context compaction when approaching limits
+- GEPA prompt optimization (see below)
 
 **Future:**
-- GEPA prompt optimization
 - Gmail/Calendar integration
 - Group chat support
 - Voice messages
+
+## GEPA Prompt Optimization
+
+Sage includes a GEPA (Genetic-Pareto) optimization system for automatically improving the agent instruction based on test cases and feedback.
+
+**How it works:**
+1. Define training examples in `examples/gepa/trainset.json` with expected behaviors
+2. Run evaluation to get baseline score against current instruction
+3. Run optimization - Claude (judge) analyzes failures and proposes instruction improvements
+4. Kimi (program) is re-evaluated with the improved instruction
+5. Repeat until convergence or perfect score
+
+**Commands:**
+```bash
+# Evaluate current instruction (baseline score)
+just gepa-eval
+
+# Run optimization loop (requires ANTHROPIC_API_KEY)
+just gepa-optimize
+
+# View optimized instruction
+just gepa-show
+
+# See training example categories
+just gepa-examples
+```
+
+**Environment:**
+```bash
+# Required for GEPA optimization (Claude as judge)
+ANTHROPIC_API_KEY=your-anthropic-key
+
+# Program under test (Kimi via Maple)
+MAPLE_API_URL=https://your-maple-endpoint
+MAPLE_API_KEY=your-maple-key
+MAPLE_MODEL=maple/kimi-k2-5
+```
+
+**Training Examples:**
+Training data is in `examples/gepa/trainset.json`. Each example includes:
+- Input scenario (user message or tool result)
+- Context (persona, human block, conversation history)
+- Expected behavior description
+- Good/bad response examples
+
+Current categories: first-time users, casual chat, web search, memory storage, tool result processing, corrections.
 
 ## Related Projects
 

@@ -232,25 +232,24 @@ ci-check:
 # GEPA Prompt Optimization
 # =============================================================================
 
-# Run GEPA optimization (development mode - fast, cheap)
-gepa-optimize-dev:
-    cargo run --release --bin gepa-optimize -- --mode dev
+# Evaluate current AGENT_INSTRUCTION against training examples (baseline score)
+gepa-eval:
+    cargo run --release --bin gepa-optimize -- --eval
 
-# Run GEPA optimization (production mode - thorough, expensive)
+# Run GEPA optimization loop (Claude as judge, Kimi as program)
+# Requires ANTHROPIC_API_KEY env var for Claude judge
 gepa-optimize:
-    cargo run --release --bin gepa-optimize -- --mode production
+    cargo run --release --bin gepa-optimize -- --optimize
 
-# View GEPA optimization history
-gepa-history:
-    @cat optimized_instructions/evolution_history.json 2>/dev/null || echo "No optimization history found. Run 'just gepa-optimize-dev' first."
+# Show current optimized instruction
+gepa-show:
+    @cat optimized_instructions/latest.txt 2>/dev/null || echo "No optimized instruction found. Run 'just gepa-optimize' first."
 
-# Compare baseline vs optimized instructions
-gepa-compare:
-    cargo run --release --bin gepa-optimize -- --compare
-
-# Create new GEPA evaluation dataset
-gepa-create-dataset:
-    @echo "GEPA datasets are in examples/gepa/"
-    @echo "  - trainset.json: Training examples"
-    @echo "  - valset.json: Validation examples"
-    @ls -la examples/gepa/
+# Show GEPA training examples
+gepa-examples:
+    @echo "GEPA training examples in examples/gepa/trainset.json"
+    @echo ""
+    @echo "Categories:"
+    @grep -o '"category": "[^"]*"' examples/gepa/trainset.json | sort | uniq -c
+    @echo ""
+    @echo "Total examples: $(grep -c '"id":' examples/gepa/trainset.json)"
