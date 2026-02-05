@@ -62,8 +62,9 @@ pub struct AgentResponse {
     #[input(desc = "Is this the first conversation with this user?")]
     pub is_first_time_user: bool,
 
-    #[output(desc = "Your reasoning/thought process (think step by step)")]
-    pub reasoning: String,
+    // NOTE: No reasoning output field - Kimi K2.5 is a thinking model that puts
+    // its reasoning in reasoning_content. Having a separate reasoning field
+    // causes </think> tags to leak into the output and break parsing.
 
     #[output(desc = "Array of messages to send to the user (can be empty)")]
     pub messages: Vec<String>,
@@ -92,8 +93,7 @@ pub struct CorrectionResponse {
     #[input(desc = "Available tools for reference")]
     pub available_tools: String,
 
-    #[output(desc = "Your reasoning about how to fix the response")]
-    pub reasoning: String,
+    // NOTE: No reasoning output - Kimi K2.5 thinks in reasoning_content
 
     #[output(desc = "Array of messages extracted/fixed from the original response")]
     pub messages: Vec<String>,
@@ -118,12 +118,11 @@ RULES:
 - Each field appears exactly ONCE with all items in that single array
 - If you can't determine what was intended, use empty arrays
 
-OUTPUT FORMAT:
-- reasoning: Explain what was wrong and how you fixed it
+OUTPUT FORMAT (exactly 2 fields):
 - messages: ALL extracted messages in ONE array
 - tool_calls: ALL extracted tool calls in ONE array (or [] if none intended)
 
-CRITICAL: Do NOT include <think> or </think> tags - use ONLY the [[ ## field ## ]] format."#;
+Each [[ ## field ## ]] marker MUST be on its own line."#;
 
 /// Default instruction for the agent (can be optimized by GEPA)
 /// Note: Memory blocks are injected separately via memory.compile()
@@ -214,15 +213,13 @@ The "done" tool means "nothing more to do" - use it ONLY when:
 - no other tools are needed
 
 OUTPUT FORMAT:
-Each field appears exactly ONCE. Put ALL content in that single field:
-- reasoning: Your thought process (one block, can be multiple sentences)
+You have exactly 2 output fields. Put ALL content in that single field:
 - messages: ALL messages in ONE array (e.g., ["msg1", "msg2", "msg3"])
 - tool_calls: ALL tool calls in ONE array
 
 CRITICAL FORMAT RULES:
 - Do NOT repeat field tags. Wrong: multiple [[ ## messages ## ]] blocks. Right: one messages array with all items
 - Do NOT include field delimiter tags INSIDE your content blocks
-- Do NOT include <think> or </think> tags anywhere in your output
 - Each [[ ## field ## ]] marker MUST be on its own line - nothing else on that line (no tags, no text before or after)
 - Keep your output clean and strictly follow the field delimiters"#;
 
@@ -657,10 +654,6 @@ impl SageAgent {
         tracing::info!("=== CORRECTION RESULT ===");
         tracing::info!("Corrected messages: {:?}", corrected.messages);
         tracing::info!("Corrected tool_calls: {:?}", corrected.tool_calls);
-        tracing::info!(
-            "Correction reasoning: {}",
-            &corrected.reasoning[..corrected.reasoning.len().min(200)]
-        );
 
         // Convert CorrectionResponse to AgentResponse
         Ok(AgentResponse {
@@ -673,7 +666,6 @@ impl SageAgent {
             recent_conversation: String::new(),
             available_tools: available_tools.to_string(),
             is_first_time_user: false,
-            reasoning: corrected.reasoning,
             messages: corrected.messages,
             tool_calls: corrected.tool_calls,
         })
@@ -878,10 +870,6 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
         tracing::info!("=== LLM RESPONSE ===");
         tracing::info!("Messages (raw): {:?}", response.messages);
         tracing::info!("Tool calls: {:?}", response.tool_calls);
-        tracing::info!(
-            "Reasoning: {}",
-            &response.reasoning[..response.reasoning.len().min(200)]
-        );
 
         // Unwrap nested JSON arrays and collect non-empty messages
         // Sometimes the LLM double-encodes: ["[\"msg1\", \"msg2\"]"] instead of ["msg1", "msg2"]

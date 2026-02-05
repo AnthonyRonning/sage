@@ -31,92 +31,74 @@ fn evaluate_with_feedback(
     example: &TrainingExample,
     messages: &[String],
     tool_names: &[String],
-    reasoning: &str,
 ) -> FeedbackMetric {
     let mut score = 0.0f32;
     let mut feedback = String::new();
 
-    // Check 1: First-time user should ask for name (0.3)
+    // Check 1: First-time user should ask for name (0.35)
     if example.is_first_time_user && example.human_block.is_empty() {
         let asks_name = messages.iter().any(|m| {
             let lower = m.to_lowercase();
             lower.contains("name") || lower.contains("call you") || lower.contains("who are you")
         });
         if asks_name {
-            score += 0.3;
+            score += 0.35;
             feedback.push_str("✓ Asked for user's name (first-time user)\n");
         } else {
             feedback.push_str("✗ Did NOT ask for name (first-time user with empty human_block)\n");
         }
     } else {
-        score += 0.3; // N/A
+        score += 0.35; // N/A
     }
 
-    // Check 2: Message style (0.2)
+    // Check 2: Message style (0.25)
     if example.expected_behavior.contains("casual") || example.expected_behavior.contains("multiple") {
         if messages.len() >= 2 {
-            score += 0.2;
+            score += 0.25;
             feedback.push_str(&format!("✓ Multiple messages ({} messages)\n", messages.len()));
         } else {
             feedback.push_str(&format!("✗ Expected multiple casual messages, got {}\n", messages.len()));
         }
     } else if example.expected_behavior.contains("silent") || example.expected_behavior.contains("done") {
         if messages.is_empty() && tool_names.contains(&"done".to_string()) {
-            score += 0.2;
+            score += 0.25;
             feedback.push_str("✓ Silent done (no messages, done tool)\n");
         } else {
             feedback.push_str("✗ Expected silent done\n");
         }
     } else {
-        score += 0.2;
+        score += 0.25;
     }
 
-    // Check 3: Expected tools (0.25)
+    // Check 3: Expected tools (0.30)
     if example.expected_behavior.contains("memory_append") {
         if tool_names.iter().any(|t| t.contains("memory")) {
-            score += 0.25;
+            score += 0.30;
             feedback.push_str("✓ Used memory tool\n");
         } else {
             feedback.push_str("✗ Expected memory tool usage\n");
         }
     } else if example.expected_behavior.contains("archival") {
         if tool_names.iter().any(|t| t.contains("archival")) {
-            score += 0.25;
+            score += 0.30;
             feedback.push_str("✓ Used archival tool\n");
         } else {
             feedback.push_str("✗ Expected archival tool usage\n");
         }
     } else if example.expected_behavior.contains("web_search") {
         if tool_names.contains(&"web_search".to_string()) {
-            score += 0.25;
+            score += 0.30;
             feedback.push_str("✓ Used web_search\n");
         } else {
             feedback.push_str("✗ Expected web_search\n");
         }
     } else {
-        score += 0.25;
+        score += 0.30;
     }
 
-    // Check 4: Reasoning quality (0.15)
-    if reasoning.len() > 20 {
-        score += 0.15;
-        feedback.push_str("✓ Has reasoning\n");
-    } else {
-        feedback.push_str("✗ Minimal/no reasoning\n");
-    }
-
-    // Check 5: No bad patterns in content (0.1)
-    // Note: [[ ## completed ## ]] at the END is fine (DSRs expects it)
-    // We only penalize [[ ## appearing INSIDE field content (which breaks parsing)
-    let has_bad_pattern = reasoning.contains("</think>") || 
-                          reasoning.contains("[[ ## reasoning ##") ||
-                          reasoning.contains("[[ ## messages ##") ||
-                          reasoning.contains("[[ ## tool_calls ##");
-    if !has_bad_pattern {
-        score += 0.1;
-    } else {
-        feedback.push_str("✗ Contains bad patterns (</think> or field markers inside content)\n");
-    }
+    // Check 4: Parse success (0.10) - if we got here, parsing succeeded
+    score += 0.10;
+    feedback.push_str("✓ Response parsed successfully\n");
 
     feedback.push_str(&format!("\nExpected: {}\n", example.expected_behavior));
     feedback.push_str(&format!("Messages: {:?}\n", messages));
@@ -301,7 +283,7 @@ async fn run_evaluation_async() -> Result<()> {
         match predictor.call(input).await {
             Ok(response) => {
                 let tool_names: Vec<String> = response.tool_calls.iter().map(|t| t.name.clone()).collect();
-                let feedback = evaluate_with_feedback(example, &response.messages, &tool_names, &response.reasoning);
+                let feedback = evaluate_with_feedback(example, &response.messages, &tool_names);
                 total_score += feedback.score;
                 
                 let status = if feedback.score >= 0.8 { "✓" } else if feedback.score >= 0.5 { "~" } else { "✗" };
@@ -652,7 +634,7 @@ async fn evaluate_instruction(
         match predictor.call(input).await {
             Ok(response) => {
                 let tool_names: Vec<String> = response.tool_calls.iter().map(|t| t.name.clone()).collect();
-                let feedback = evaluate_with_feedback(example, &response.messages, &tool_names, &response.reasoning);
+                let feedback = evaluate_with_feedback(example, &response.messages, &tool_names);
                 
                 scores.insert(idx, feedback.score);
                 traces.push(ExecutionTrace {

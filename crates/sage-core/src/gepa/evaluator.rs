@@ -36,7 +36,6 @@ pub struct ComponentScores {
 /// Parsed agent response for evaluation
 #[derive(Clone, Debug, Default)]
 pub struct ParsedResponse {
-    pub reasoning: String,
     pub messages: Vec<String>,
     pub tool_calls: Vec<ParsedToolCall>,
     pub parse_error: Option<String>,
@@ -339,7 +338,6 @@ pub const JUDGE_PROMPT: &str = r#"You are evaluating an AI assistant's response.
 **Should Store Memory:** {should_store_memory}
 
 **Actual Response:**
-- Reasoning: {reasoning}
 - Messages: {messages}
 - Tool Calls: {tool_calls}
 
@@ -382,7 +380,6 @@ pub fn format_judge_prompt(example: &GepaExample, response: &ParsedResponse) -> 
         .replace("{expected_response_type}", &example.expected_response_type)
         .replace("{expected_tools}", &format!("{:?}", example.expected_tools))
         .replace("{should_store_memory}", &example.should_store_memory.to_string())
-        .replace("{reasoning}", &response.reasoning)
         .replace("{messages}", &messages)
         .replace("{tool_calls}", &tool_calls)
         .replace("{bad_patterns}", &format!("{:?}", example.bad_patterns))
@@ -450,7 +447,6 @@ mod tests {
 
     fn make_response(messages: Vec<&str>, tools: Vec<&str>) -> ParsedResponse {
         ParsedResponse {
-            reasoning: "Test reasoning".to_string(),
             messages: messages.into_iter().map(String::from).collect(),
             tool_calls: tools
                 .into_iter()
@@ -513,7 +509,6 @@ pub fn evaluate_response(
 ) -> EvaluationResult {
     // Convert to ParsedResponse format
     let response = ParsedResponse {
-        reasoning: String::new(),
         messages: messages.to_vec(),
         tool_calls: tool_names
             .iter()

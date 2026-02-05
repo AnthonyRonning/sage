@@ -53,8 +53,7 @@ impl GepaSageModule {
             #[input(desc = "Available tools")]
             available_tools: String,
 
-            #[output(desc = "Reasoning")]
-            reasoning: String,
+            // No reasoning output - Kimi K2.5 thinks in reasoning_content
             #[output(desc = "Messages to send")]
             messages: Vec<String>,
             #[output(desc = "Tool calls")]
@@ -95,7 +94,6 @@ impl GepaSageModule {
         // Call LLM
         match predictor.call(input).await {
             Ok(response) => Ok(ParsedResponse {
-                reasoning: response.reasoning,
                 messages: response.messages,
                 tool_calls: response
                     .tool_calls
@@ -108,7 +106,6 @@ impl GepaSageModule {
                 parse_error: None,
             }),
             Err(e) => Ok(ParsedResponse {
-                reasoning: String::new(),
                 messages: vec![],
                 tool_calls: vec![],
                 parse_error: Some(e.to_string()),

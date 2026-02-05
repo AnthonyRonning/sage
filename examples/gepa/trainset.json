@@ -261,6 +261,27 @@
         "tool_calls": [{"name": "memory_replace", "args": {"block": "human", "old": "Moving to Portland next month", "new": "Moved to Seattle"}}]
       },
       "bad_patterns": ["not updating memory", "using append instead of replace", "apologizing excessively"]
+    },
+    {
+      "id": "location_with_pending_action",
+      "category": "context_awareness",
+      "input": "austin, that's where i live",
+      "current_time": "02/05/2026 18:30:47 (Thursday) UTC",
+      "persona_block": "I am Sage, a helpful AI assistant communicating via Signal. I maintain long-term memory across our conversations and strive to be friendly, concise, and genuinely helpful.",
+      "human_block": "Name: Anthony",
+      "memory_metadata": "- Memory blocks last modified: 2026-02-05 18:27:46 UTC\n- 13 messages in recall memory (use conversation_search to access)\n- 0 passages in archival memory (use archival_search to access)",
+      "previous_context_summary": "",
+      "recent_conversation": "[user @ 02/05/2026 18:27:11 UTC]: hello\n[assistant @ 02/05/2026 18:27:19 UTC]: Hey there! 👋\n[assistant @ 02/05/2026 18:27:19 UTC]: Welcome! I'm Sage.\n[assistant @ 02/05/2026 18:27:19 UTC]: It's nice to meet you! What's your name?\n[user @ 02/05/2026 18:27:38 UTC]: I'm Anthony, good to meet you too. What can you do?\n[assistant @ 02/05/2026 18:27:51 UTC]: Nice to meet you, Anthony!\n[assistant @ 02/05/2026 18:27:51 UTC]: I can help with lots of things:\n[assistant @ 02/05/2026 18:27:51 UTC]: • Answering questions & chatting\n• Web search for current info\n• Managing your memory (I remember details about you)\n• Scheduling reminders\n• Running calculations & code\n[assistant @ 02/05/2026 18:27:51 UTC]: What would you like to try?\n[tool @ 02/05/2026 18:27:55 UTC]: memory_append(content=\"Name: Anthony\", block=\"human\") → Successfully appended to 'human' block.\n[user @ 02/05/2026 18:30:30 UTC]: oh can you search the weather for me?\n[assistant @ 02/05/2026 18:30:34 UTC]: Sure! What city would you like the weather for?\n[user @ 02/05/2026 18:30:47 UTC]: austin, that's where i live",
+      "is_first_time_user": false,
+      "expected_behavior": "User provided location AND there's a pending weather request from conversation history. Store location to memory (both core and archival) AND immediately search weather. Do NOT ask again - the user already requested weather search.",
+      "expected_response_type": "action_with_memory",
+      "expected_tools": ["memory_append", "archival_insert", "web_search"],
+      "should_store_memory": true,
+      "good_response": {
+        "messages": ["Austin! Great city, I'll remember that. 🌮", "Let me grab the weather for you."],
+        "tool_calls": [{"name": "memory_append", "args": {"block": "human", "content": "Location: Austin, TX"}}, {"name": "archival_insert", "args": {"content": "Anthony lives in Austin, Texas.", "tags": "location,home"}}, {"name": "web_search", "args": {"query": "weather", "location": "Austin, TX"}}]
+      },
+      "bad_patterns": ["asking if they want weather searched", "not searching weather immediately", "only storing memory without doing the requested action", "asking for confirmation when action was already requested"]
     }
   ]
 }

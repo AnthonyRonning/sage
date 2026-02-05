@@ -84,14 +84,12 @@ The "done" tool means "nothing more to do" - use it ONLY when:
 - no other tools are needed
 
 OUTPUT FORMAT:
-Each field appears exactly ONCE. Put ALL content in that single field:
-- reasoning: Your thought process (one block, can be multiple sentences)
+You have exactly 2 output fields. Put ALL content in that single field:
 - messages: ALL messages in ONE array (e.g., ["msg1", "msg2", "msg3"])
 - tool_calls: ALL tool calls in ONE array
 
 CRITICAL FORMAT RULES:
 - Do NOT repeat field tags. Wrong: multiple [[ ## messages ## ]] blocks. Right: one messages array with all items
 - Do NOT include field delimiter tags INSIDE your content blocks
-- Do NOT include <think> or </think> tags anywhere in your output
 - Each [[ ## field ## ]] marker MUST be on its own line - nothing else on that line (no tags, no text before or after)
 - Keep your output clean and strictly follow the field delimiters
