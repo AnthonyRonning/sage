@@ -8,7 +8,7 @@
 //!   cargo run --bin gepa-optimize -- --optimize     (run GEPA optimization)
 
 use anyhow::Result;
-use dspy_rs::{configure, ChatAdapter, FeedbackMetric, LM, Predict, Signature};
+use dspy_rs::{configure, ChatAdapter, FeedbackMetric, Predict, Signature, LM};
 use sage_core::{AgentResponse, AgentResponseInput, AGENT_INSTRUCTION};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -52,14 +52,24 @@ fn evaluate_with_feedback(
     }
 
     // Check 2: Message style (0.25)
-    if example.expected_behavior.contains("casual") || example.expected_behavior.contains("multiple") {
+    if example.expected_behavior.contains("casual")
+        || example.expected_behavior.contains("multiple")
+    {
         if messages.len() >= 2 {
             score += 0.25;
-            feedback.push_str(&format!("✓ Multiple messages ({} messages)\n", messages.len()));
+            feedback.push_str(&format!(
+                "✓ Multiple messages ({} messages)\n",
+                messages.len()
+            ));
         } else {
-            feedback.push_str(&format!("✗ Expected multiple casual messages, got {}\n", messages.len()));
+            feedback.push_str(&format!(
+                "✗ Expected multiple casual messages, got {}\n",
+                messages.len()
+            ));
         }
-    } else if example.expected_behavior.contains("silent") || example.expected_behavior.contains("done") {
+    } else if example.expected_behavior.contains("silent")
+        || example.expected_behavior.contains("done")
+    {
         if messages.is_empty() && tool_names.contains(&"done".to_string()) {
             score += 0.25;
             feedback.push_str("✓ Silent done (no messages, done tool)\n");
@@ -138,31 +148,36 @@ fn load_trainset() -> Vec<TrainingExample> {
     let json_path = std::path::Path::new("examples/gepa/trainset.json");
     if json_path.exists() {
         let content = std::fs::read_to_string(json_path).expect("Failed to read trainset.json");
-        let json: serde_json::Value = serde_json::from_str(&content).expect("Failed to parse trainset.json");
-        
+        let json: serde_json::Value =
+            serde_json::from_str(&content).expect("Failed to parse trainset.json");
+
         let examples = json["examples"].as_array().expect("No examples array");
-        return examples.iter().map(|e| {
-            TrainingExample {
+        return examples
+            .iter()
+            .map(|e| TrainingExample {
                 input: e["input"].as_str().unwrap_or("").to_string(),
                 current_time: e["current_time"].as_str().unwrap_or("").to_string(),
                 persona_block: e["persona_block"].as_str().unwrap_or("").to_string(),
                 human_block: e["human_block"].as_str().unwrap_or("").to_string(),
                 memory_metadata: e["memory_metadata"].as_str().unwrap_or("").to_string(),
-                previous_context_summary: e["previous_context_summary"].as_str().unwrap_or("").to_string(),
+                previous_context_summary: e["previous_context_summary"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
                 recent_conversation: e["recent_conversation"].as_str().unwrap_or("").to_string(),
                 is_first_time_user: e["is_first_time_user"].as_bool().unwrap_or(false),
                 expected_behavior: e["expected_behavior"].as_str().unwrap_or("").to_string(),
-            }
-        }).collect();
+            })
+            .collect();
     }
-    
+
     // Fallback if file doesn't exist
     eprintln!("Warning: examples/gepa/trainset.json not found, using empty trainset");
     vec![]
 }
 
 // ============================================================================
-// Main Entry Points  
+// Main Entry Points
 // ============================================================================
 
 fn run_evaluation() -> Result<()> {
@@ -175,7 +190,8 @@ async fn run_evaluation_async() -> Result<()> {
 
     dotenvy::dotenv().ok();
 
-    let api_url = std::env::var("MAPLE_API_URL").unwrap_or_else(|_| "http://localhost:8089/v1".into());
+    let api_url =
+        std::env::var("MAPLE_API_URL").unwrap_or_else(|_| "http://localhost:8089/v1".into());
     let api_key = std::env::var("MAPLE_API_KEY").unwrap_or_else(|_| "test".into());
     let model = std::env::var("MAPLE_MODEL").unwrap_or_else(|_| "gpt-4".into());
 
@@ -203,7 +219,7 @@ async fn run_evaluation_async() -> Result<()> {
     println!("Training examples: {}\n", trainset.len());
 
     let mut total_score = 0.0f32;
-    
+
     for example in &trainset {
         let input = AgentResponseInput {
             input: example.input.clone(),
@@ -221,11 +237,18 @@ async fn run_evaluation_async() -> Result<()> {
 
         match predictor.call(input).await {
             Ok(response) => {
-                let tool_names: Vec<String> = response.tool_calls.iter().map(|t| t.name.clone()).collect();
+                let tool_names: Vec<String> =
+                    response.tool_calls.iter().map(|t| t.name.clone()).collect();
                 let feedback = evaluate_with_feedback(example, &response.messages, &tool_names);
                 total_score += feedback.score;
-                
-                let status = if feedback.score >= 0.8 { "✓" } else if feedback.score >= 0.5 { "~" } else { "✗" };
+
+                let status = if feedback.score >= 0.8 {
+                    "✓"
+                } else if feedback.score >= 0.5 {
+                    "~"
+                } else {
+                    "✗"
+                };
                 println!("{} [{:.2}] {}", status, feedback.score, input_short);
             }
             Err(e) => {
@@ -287,12 +310,15 @@ struct ProposeInstruction {
 struct GEPACandidate {
     instruction: String,
     scores: HashMap<usize, f32>,
+    #[allow(dead_code)]
     generation: usize,
 }
 
 impl GEPACandidate {
     fn average_score(&self) -> f32 {
-        if self.scores.is_empty() { return 0.0; }
+        if self.scores.is_empty() {
+            return 0.0;
+        }
         self.scores.values().sum::<f32>() / self.scores.len() as f32
     }
 }
@@ -338,7 +364,8 @@ async fn run_optimization_async() -> Result<()> {
     dotenvy::dotenv().ok();
 
     // Configure program LM (Kimi - the model being optimized)
-    let api_url = std::env::var("MAPLE_API_URL").unwrap_or_else(|_| "http://localhost:8089/v1".into());
+    let api_url =
+        std::env::var("MAPLE_API_URL").unwrap_or_else(|_| "http://localhost:8089/v1".into());
     let api_key = std::env::var("MAPLE_API_KEY").unwrap_or_else(|_| "test".into());
     let model = std::env::var("MAPLE_MODEL").unwrap_or_else(|_| "gpt-4".into());
 
@@ -354,8 +381,8 @@ async fn run_optimization_async() -> Result<()> {
         .await?;
 
     // Configure judge LM (Claude via Anthropic API - for reflection/mutation)
-    let judge_api_key = std::env::var("ANTHROPIC_API_KEY")
-        .expect("ANTHROPIC_API_KEY must be set for GEPA judge");
+    let judge_api_key =
+        std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for GEPA judge");
     let judge_model = std::env::var("GEPA_JUDGE_MODEL")
         .unwrap_or_else(|_| "anthropic:claude-sonnet-4-5-20250929".into());
 
@@ -396,7 +423,8 @@ async fn run_optimization_async() -> Result<()> {
     println!("============================================================\n");
 
     configure(program_lm.clone(), ChatAdapter);
-    let (baseline_scores, baseline_traces) = evaluate_instruction(&best_candidate.instruction, &trainset).await;
+    let (baseline_scores, baseline_traces) =
+        evaluate_instruction(&best_candidate.instruction, &trainset).await;
     best_candidate.scores = baseline_scores;
     let baseline_score = best_candidate.average_score();
     evolution_history.push((0, baseline_score));
@@ -417,10 +445,7 @@ async fn run_optimization_async() -> Result<()> {
         }
 
         // Get failed traces
-        let failed_traces: Vec<_> = baseline_traces
-            .iter()
-            .filter(|t| t.score < 0.95)
-            .collect();
+        let failed_traces: Vec<_> = baseline_traces.iter().filter(|t| t.score < 0.95).collect();
 
         if failed_traces.is_empty() {
             println!("No failures to address. Stopping.");
@@ -429,7 +454,12 @@ async fn run_optimization_async() -> Result<()> {
 
         println!("Failures to address: {}", failed_traces.len());
         for t in &failed_traces {
-            println!("  - Example {} ({:.2}): {}", t.example_idx, t.score, &t.input[..t.input.len().min(30)]);
+            println!(
+                "  - Example {} ({:.2}): {}",
+                t.example_idx,
+                t.score,
+                &t.input[..t.input.len().min(30)]
+            );
         }
 
         // GEPA Reflection with Claude
@@ -451,15 +481,20 @@ async fn run_optimization_async() -> Result<()> {
             )
             .build();
 
-        let reflection = match reflect_predictor.call(ReflectOnTracesInput {
-            current_instruction: best_candidate.instruction.clone(),
-            failed_traces: traces_text.clone(),
-            task_description: TASK_DESCRIPTION.to_string(),
-        }).await {
+        let reflection = match reflect_predictor
+            .call(ReflectOnTracesInput {
+                current_instruction: best_candidate.instruction.clone(),
+                failed_traces: traces_text.clone(),
+                task_description: TASK_DESCRIPTION.to_string(),
+            })
+            .await
+        {
             Ok(r) => {
                 println!("\n--- Reflection ---");
                 println!("{}", &r.reflection[..r.reflection.len().min(500)]);
-                if r.reflection.len() > 500 { println!("..."); }
+                if r.reflection.len() > 500 {
+                    println!("...");
+                }
                 println!("---\n");
                 r.reflection
             }
@@ -475,14 +510,17 @@ async fn run_optimization_async() -> Result<()> {
                 "You are an expert prompt engineer. Given the reflection on failures, \
                  output an IMPROVED version of the instruction that fixes the issues. \
                  Output ONLY the complete instruction text, starting with 'You are Sage'. \
-                 Keep the same structure but add/modify rules to fix the failures."
+                 Keep the same structure but add/modify rules to fix the failures.",
             )
             .build();
 
-        let improved_instruction = match propose_predictor.call(ProposeInstructionInput {
-            current_instruction: best_candidate.instruction.clone(),
-            reflection,
-        }).await {
+        let improved_instruction = match propose_predictor
+            .call(ProposeInstructionInput {
+                current_instruction: best_candidate.instruction.clone(),
+                reflection,
+            })
+            .await
+        {
             Ok(r) => r.improved_instruction,
             Err(e) => {
                 println!("Proposal failed: {:?}", e);
@@ -493,8 +531,8 @@ async fn run_optimization_async() -> Result<()> {
         // Evaluate new instruction
         println!("Evaluating improved instruction...");
         configure(program_lm.clone(), ChatAdapter);
-        let (new_scores, new_traces) = evaluate_instruction(&improved_instruction, &trainset).await;
-        
+        let (new_scores, _new_traces) = evaluate_instruction(&improved_instruction, &trainset).await;
+
         let new_candidate = GEPACandidate {
             instruction: improved_instruction,
             scores: new_scores,
@@ -502,7 +540,11 @@ async fn run_optimization_async() -> Result<()> {
         };
         let new_score = new_candidate.average_score();
 
-        println!("\nNew score: {:.3} (was {:.3})", new_score, best_candidate.average_score());
+        println!(
+            "\nNew score: {:.3} (was {:.3})",
+            new_score,
+            best_candidate.average_score()
+        );
         print_score_comparison(&best_candidate.scores, &new_candidate.scores, &trainset);
 
         // Update if improved
@@ -527,7 +569,11 @@ async fn run_optimization_async() -> Result<()> {
     }
 
     let improvement = best_candidate.average_score() - baseline_score;
-    println!("\nFinal: {:.3} (improvement: {:+.3})", best_candidate.average_score(), improvement);
+    println!(
+        "\nFinal: {:.3} (improvement: {:+.3})",
+        best_candidate.average_score(),
+        improvement
+    );
 
     // Save optimized instruction
     let output_path = PathBuf::from("optimized_instructions/latest.txt");
@@ -572,9 +618,10 @@ async fn evaluate_instruction(
 
         match predictor.call(input).await {
             Ok(response) => {
-                let tool_names: Vec<String> = response.tool_calls.iter().map(|t| t.name.clone()).collect();
+                let tool_names: Vec<String> =
+                    response.tool_calls.iter().map(|t| t.name.clone()).collect();
                 let feedback = evaluate_with_feedback(example, &response.messages, &tool_names);
-                
+
                 scores.insert(idx, feedback.score);
                 traces.push(ExecutionTrace {
                     example_idx: idx,
@@ -607,19 +654,41 @@ async fn evaluate_instruction(
 fn print_scores(scores: &HashMap<usize, f32>, trainset: &[TrainingExample]) {
     for (idx, example) in trainset.iter().enumerate() {
         let score = scores.get(&idx).unwrap_or(&0.0);
-        let status = if *score >= 0.95 { "✓" } else if *score >= 0.7 { "~" } else { "✗" };
+        let status = if *score >= 0.95 {
+            "✓"
+        } else if *score >= 0.7 {
+            "~"
+        } else {
+            "✗"
+        };
         let input_short = &example.input[..example.input.len().min(35)];
         println!("  {} [{:.2}] {}", status, score, input_short);
     }
 }
 
-fn print_score_comparison(old: &HashMap<usize, f32>, new: &HashMap<usize, f32>, trainset: &[TrainingExample]) {
+fn print_score_comparison(
+    old: &HashMap<usize, f32>,
+    new: &HashMap<usize, f32>,
+    trainset: &[TrainingExample],
+) {
     for (idx, example) in trainset.iter().enumerate() {
         let old_score = old.get(&idx).unwrap_or(&0.0);
         let new_score = new.get(&idx).unwrap_or(&0.0);
         let delta = new_score - old_score;
-        let arrow = if delta > 0.01 { "↑" } else if delta < -0.01 { "↓" } else { "=" };
-        let status = if *new_score >= 0.95 { "✓" } else if *new_score >= 0.7 { "~" } else { "✗" };
+        let arrow = if delta > 0.01 {
+            "↑"
+        } else if delta < -0.01 {
+            "↓"
+        } else {
+            "="
+        };
+        let status = if *new_score >= 0.95 {
+            "✓"
+        } else if *new_score >= 0.7 {
+            "~"
+        } else {
+            "✗"
+        };
         let input_short = &example.input[..example.input.len().min(30)];
         println!("  {} [{:.2}] {} {}", status, new_score, input_short, arrow);
     }

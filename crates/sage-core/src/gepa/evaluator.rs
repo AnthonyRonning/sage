@@ -101,8 +101,8 @@ fn evaluate_style(example: &GepaExample, response: &ParsedResponse, feedback: &m
         "casual" => {
             // Casual: expect multiple short messages
             if response.messages.len() >= 2 {
-                let avg_len: usize =
-                    response.messages.iter().map(|m| m.len()).sum::<usize>() / response.messages.len();
+                let avg_len: usize = response.messages.iter().map(|m| m.len()).sum::<usize>()
+                    / response.messages.len();
                 if avg_len < 150 {
                     return max_score;
                 }
@@ -130,9 +130,8 @@ fn evaluate_style(example: &GepaExample, response: &ParsedResponse, feedback: &m
                 );
                 return max_score * 0.5;
             }
-            feedback.push_str(
-                "Style Mismatch\n  Expected: Detailed response\n  Got: No messages\n",
-            );
+            feedback
+                .push_str("Style Mismatch\n  Expected: Detailed response\n  Got: No messages\n");
             0.0
         }
         "tool_use" => {
@@ -257,7 +256,12 @@ fn evaluate_memory(example: &GepaExample, response: &ParsedResponse, feedback: &
         return max_score;
     }
 
-    let memory_tools = ["memory_append", "memory_replace", "memory_insert", "archival_insert"];
+    let memory_tools = [
+        "memory_append",
+        "memory_replace",
+        "memory_insert",
+        "archival_insert",
+    ];
     let has_memory_op = response
         .tool_calls
         .iter()
@@ -273,7 +277,11 @@ fn evaluate_memory(example: &GepaExample, response: &ParsedResponse, feedback: &
     0.0
 }
 
-fn evaluate_content(example: &GepaExample, response: &ParsedResponse, feedback: &mut String) -> f32 {
+fn evaluate_content(
+    example: &GepaExample,
+    response: &ParsedResponse,
+    feedback: &mut String,
+) -> f32 {
     let max_score: f32 = 0.15;
     let mut score: f32 = max_score;
 
@@ -295,17 +303,16 @@ fn evaluate_content(example: &GepaExample, response: &ParsedResponse, feedback: 
     let messages_combined: String = response.messages.join(" ").to_lowercase();
 
     // Don't announce memory operations
-    if messages_combined.contains("i'll remember")
+    if (messages_combined.contains("i'll remember")
         || messages_combined.contains("i've saved")
         || messages_combined.contains("stored to memory")
-        || messages_combined.contains("noted that")
+        || messages_combined.contains("noted that"))
+        && example.should_store_memory
     {
-        if example.should_store_memory {
-            feedback.push_str(
-                "Content Warning\n  Issue: Announced memory operation to user\n  Suggestion: Memory operations should be silent\n",
-            );
-            score -= max_score * 0.5;
-        }
+        feedback.push_str(
+            "Content Warning\n  Issue: Announced memory operation to user\n  Suggestion: Memory operations should be silent\n",
+        );
+        score -= max_score * 0.5;
     }
 
     // Check for robotic phrasing
@@ -379,7 +386,10 @@ pub fn format_judge_prompt(example: &GepaExample, response: &ParsedResponse) -> 
         .replace("{expected_behavior}", &example.expected_behavior)
         .replace("{expected_response_type}", &example.expected_response_type)
         .replace("{expected_tools}", &format!("{:?}", example.expected_tools))
-        .replace("{should_store_memory}", &example.should_store_memory.to_string())
+        .replace(
+            "{should_store_memory}",
+            &example.should_store_memory.to_string(),
+        )
         .replace("{messages}", &messages)
         .replace("{tool_calls}", &tool_calls)
         .replace("{bad_patterns}", &format!("{:?}", example.bad_patterns))
@@ -412,6 +422,30 @@ pub fn parse_judge_response(response: &str) -> Result<EvaluationResult> {
         feedback: output.feedback,
         component_scores: ComponentScores::default(),
     })
+}
+
+/// Simplified evaluation function for use with production AgentResponse
+///
+/// Takes messages and tool names directly (extracted from AgentResponse)
+pub fn evaluate_response(
+    example: &GepaExample,
+    messages: &[String],
+    tool_names: &[String],
+) -> EvaluationResult {
+    // Convert to ParsedResponse format
+    let response = ParsedResponse {
+        messages: messages.to_vec(),
+        tool_calls: tool_names
+            .iter()
+            .map(|name| ParsedToolCall {
+                name: name.clone(),
+                args: std::collections::HashMap::new(),
+            })
+            .collect(),
+        parse_error: None,
+    };
+
+    evaluate_rule_based(example, &response)
 }
 
 #[cfg(test)]
@@ -497,28 +531,4 @@ mod tests {
         let result2 = evaluate_rule_based(&example, &response2);
         assert!(result2.component_scores.memory > 0.15);
     }
-}
-
-/// Simplified evaluation function for use with production AgentResponse
-/// 
-/// Takes messages and tool names directly (extracted from AgentResponse)
-pub fn evaluate_response(
-    example: &GepaExample,
-    messages: &[String],
-    tool_names: &[String],
-) -> EvaluationResult {
-    // Convert to ParsedResponse format
-    let response = ParsedResponse {
-        messages: messages.to_vec(),
-        tool_calls: tool_names
-            .iter()
-            .map(|name| ParsedToolCall {
-                name: name.clone(),
-                args: std::collections::HashMap::new(),
-            })
-            .collect(),
-        parse_error: None,
-    };
-
-    evaluate_rule_based(example, &response)
 }

@@ -48,9 +48,7 @@ pub struct AgentResponse {
     #[input(desc = "Memory stats: message count in recall, archival count, last modified")]
     pub memory_metadata: String,
 
-    #[input(
-        desc = "Summary of older conversation if context was compacted. Ignore if empty."
-    )]
+    #[input(desc = "Summary of older conversation if context was compacted. Ignore if empty.")]
     pub previous_context_summary: String,
 
     #[input(desc = "Recent messages between you and the user")]
@@ -65,7 +63,6 @@ pub struct AgentResponse {
     // NOTE: No reasoning output field - Kimi K2.5 is a thinking model that puts
     // its reasoning in reasoning_content. Having a separate reasoning field
     // causes </think> tags to leak into the output and break parsing.
-
     #[output(desc = "Array of messages to send to the user (can be empty)")]
     pub messages: Vec<String>,
 
@@ -94,7 +91,6 @@ pub struct CorrectionResponse {
     pub available_tools: String,
 
     // NOTE: No reasoning output - Kimi K2.5 thinks in reasoning_content
-
     #[output(desc = "Array of messages extracted/fixed from the original response")]
     pub messages: Vec<String>,
 
@@ -584,7 +580,8 @@ impl SageAgent {
                         } else {
                             msg.content.clone()
                         };
-                        conversation.push_str(&format!("[{} @ {}]: {}\n", msg.role, timestamp, content));
+                        conversation
+                            .push_str(&format!("[{} @ {}]: {}\n", msg.role, timestamp, content));
                     }
                 }
             }

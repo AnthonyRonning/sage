@@ -20,7 +20,7 @@ mod signal;
 mod storage;
 
 use agent_manager::{AgentManager, ContextType};
-use sage_agent::{SageAgent, Tool, ToolResult};
+use sage_agent::SageAgent;
 use signal::{run_receive_loop, run_receive_loop_tcp, IncomingMessage, SignalClient};
 
 /// Health check response

@@ -2,7 +2,9 @@
 //!
 //! This wraps the Sage agent signatures to work with GEPA's optimization loop.
 
-use super::{evaluate_rule_based, EvaluationResult, GepaConfig, GepaExample, ParsedResponse, ParsedToolCall};
+use super::{
+    evaluate_rule_based, EvaluationResult, GepaConfig, GepaExample, ParsedResponse, ParsedToolCall,
+};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -39,7 +41,7 @@ impl GepaSageModule {
     ///
     /// This uses dspy-rs Predict internally with the current instruction.
     pub async fn forward(&self, example: &GepaExample) -> Result<ParsedResponse> {
-        use dspy_rs::{Predict, BamlType};
+        use dspy_rs::{BamlType, Predict};
 
         // Define the signature inline (matches AgentResponse in sage_agent.rs)
         #[derive(dspy_rs::Signature, Clone, Debug)]
@@ -203,7 +205,7 @@ pub async fn run_optimization_simple(
     trainset: Vec<GepaExample>,
     valset: Option<Vec<GepaExample>>,
 ) -> Result<GepaOptimizationResult> {
-    use dspy_rs::{LM, configure, ChatAdapter};
+    use dspy_rs::{configure, ChatAdapter, LM};
 
     tracing::info!("Starting GEPA optimization");
     tracing::info!("  Iterations: {}", config.num_iterations);
@@ -268,10 +270,8 @@ pub async fn run_optimization_simple(
         if !feedback.is_empty() {
             // Generate improved instruction through reflection
             // This is where dspy-rs GEPA would use ReflectOnTrace + ProposeImprovedInstruction
-            let new_instruction = generate_improved_instruction(
-                &module.instruction,
-                &feedback,
-            ).await?;
+            let new_instruction =
+                generate_improved_instruction(&module.instruction, &feedback).await?;
             total_lm_calls += 2; // Reflection + proposal
 
             module.set_instruction(new_instruction.clone());

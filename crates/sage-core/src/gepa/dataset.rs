@@ -129,10 +129,7 @@ impl GepaDataset {
             indices.insert(idx);
         }
 
-        indices
-            .into_iter()
-            .map(|i| &self.examples[i])
-            .collect()
+        indices.into_iter().map(|i| &self.examples[i]).collect()
     }
 }
 
@@ -177,7 +174,10 @@ mod tests {
     #[test]
     fn test_load_trainset() {
         // This test requires the trainset file to exist
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/gepa/trainset.json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/gepa/trainset.json"
+        );
         if std::path::Path::new(path).exists() {
             let dataset = GepaDataset::load_from_file(path).unwrap();
             assert!(!dataset.examples.is_empty());
