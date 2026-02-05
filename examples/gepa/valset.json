@@ -1,0 +1,116 @@
+{
+  "description": "GEPA validation dataset for Sage agent optimization",
+  "version": "1.0",
+  "examples": [
+    {
+      "id": "val_casual_1",
+      "category": "casual_chat",
+      "input": "What's up?",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 11:00:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nName: Jordan\n</human>\n</memory_blocks>",
+      "expected_behavior": "Casual, friendly response. Multiple short messages.",
+      "expected_response_type": "casual",
+      "expected_tools": [],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_search_1",
+      "category": "information_request",
+      "input": "Who won the Super Bowl this year?",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 18:00:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nLikes sports\n</human>\n</memory_blocks>",
+      "expected_behavior": "Use web_search for current sports results.",
+      "expected_response_type": "tool_use",
+      "expected_tools": ["web_search"],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_tool_result_1",
+      "category": "tool_result_processing",
+      "input": "[Tool Result: web_search]\nQuery: Super Bowl 2026 winner\nResults:\n1. Chiefs Win Super Bowl LX - ESPN\n   Kansas City Chiefs defeated the Philadelphia Eagles 31-28 in Super Bowl LX held in Santa Clara.",
+      "previous_context_summary": "",
+      "conversation_context": "User: Who won the Super Bowl this year?\nAssistant: Let me check...\n[Tool call: web_search]",
+      "expected_behavior": "Summarize the result naturally.",
+      "expected_response_type": "summarize_results",
+      "expected_tools": [],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_memory_1",
+      "category": "memory_storage",
+      "input": "I just adopted a golden retriever puppy named Max!",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 16:00:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nName: Sarah\nLives in Denver\n</human>\n</memory_blocks>",
+      "expected_behavior": "Express excitement AND store pet info to memory.",
+      "expected_response_type": "acknowledge_and_store",
+      "expected_tools": ["memory_append", "archival_insert"],
+      "should_store_memory": true
+    },
+    {
+      "id": "val_memory_done_1",
+      "category": "memory_operation_done",
+      "input": "[Tool Result: memory_append]\nSuccessfully appended to <human> block:\n\"Has a golden retriever puppy named Max (adopted February 2026)\"",
+      "previous_context_summary": "",
+      "conversation_context": "User: I just adopted a golden retriever puppy named Max!\nAssistant: Oh how exciting! Puppies are the best.\n[Tool call: memory_append]",
+      "expected_behavior": "Return done silently. User already received response.",
+      "expected_response_type": "silent_done",
+      "expected_tools": ["done"],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_recall_1",
+      "category": "memory_recall",
+      "input": "Do you remember what car I drive?",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 09:00:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nName: Mike\nWorks as a mechanic\n</human>\n</memory_blocks>",
+      "expected_behavior": "Search archival memory for car information.",
+      "expected_response_type": "tool_use",
+      "expected_tools": ["archival_search"],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_detailed_1",
+      "category": "detailed_response",
+      "input": "How does photosynthesis work?",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 15:00:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nHigh school student\n</human>\n</memory_blocks>",
+      "expected_behavior": "Detailed educational explanation. Longer message appropriate.",
+      "expected_response_type": "detailed",
+      "expected_tools": [],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_context_1",
+      "category": "context_awareness",
+      "input": "And how long does it take?",
+      "previous_context_summary": "",
+      "conversation_context": "User: I'm thinking of driving from Austin to Denver\nAssistant: That's a great road trip! The drive is about 930 miles and takes you through some beautiful scenery in New Mexico and Colorado.",
+      "expected_behavior": "Understand 'it' refers to the Austin-Denver drive. Answer about drive time.",
+      "expected_response_type": "context_aware",
+      "expected_tools": [],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_multi_tool_1",
+      "category": "complex_request",
+      "input": "Look up the latest Tesla stock price and check if I mentioned anything about investing in it before",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 14:30:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nName: Investor\nInterested in tech stocks\n</human>\n</memory_blocks>",
+      "expected_behavior": "Use web_search for stock price AND archival_search for past mentions.",
+      "expected_response_type": "tool_use",
+      "expected_tools": ["web_search", "archival_search"],
+      "should_store_memory": false
+    },
+    {
+      "id": "val_creative_1",
+      "category": "creative",
+      "input": "Tell me a short joke",
+      "previous_context_summary": "",
+      "conversation_context": "Current time: 02/05/2026 20:00:00 (Wednesday) (America/Chicago)\n\n<memory_blocks>\n<persona>\nI am Sage, a helpful AI assistant.\n</persona>\n<human>\nNo information yet.\n</human>\n</memory_blocks>",
+      "expected_behavior": "Tell a joke. Keep it brief and fun.",
+      "expected_response_type": "creative",
+      "expected_tools": [],
+      "should_store_memory": false
+    }
+  ]
+}

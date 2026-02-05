@@ -227,3 +227,30 @@ ci-check:
     cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test --all-features
+
+# =============================================================================
+# GEPA Prompt Optimization
+# =============================================================================
+
+# Run GEPA optimization (development mode - fast, cheap)
+gepa-optimize-dev:
+    cargo run --release --bin gepa-optimize -- --mode dev
+
+# Run GEPA optimization (production mode - thorough, expensive)
+gepa-optimize:
+    cargo run --release --bin gepa-optimize -- --mode production
+
+# View GEPA optimization history
+gepa-history:
+    @cat optimized_instructions/evolution_history.json 2>/dev/null || echo "No optimization history found. Run 'just gepa-optimize-dev' first."
+
+# Compare baseline vs optimized instructions
+gepa-compare:
+    cargo run --release --bin gepa-optimize -- --compare
+
+# Create new GEPA evaluation dataset
+gepa-create-dataset:
+    @echo "GEPA datasets are in examples/gepa/"
+    @echo "  - trainset.json: Training examples"
+    @echo "  - valset.json: Validation examples"
+    @ls -la examples/gepa/

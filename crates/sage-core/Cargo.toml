@@ -8,6 +8,10 @@ default-run = "sage"
 name = "sage"
 path = "src/main.rs"
 
+[[bin]]
+name = "gepa-optimize"
+path = "src/bin/gepa_optimize.rs"
+
 [dependencies]
 sage-tools = { path = "../sage-tools" }
 async-trait = "0.1"

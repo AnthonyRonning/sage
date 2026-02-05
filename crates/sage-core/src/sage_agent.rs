@@ -26,21 +26,41 @@ pub struct ToolCall {
 ///
 /// This signature defines the typed contract between input and output.
 /// The instruction is passed to the Predict builder.
+///
+/// Input fields are separated for clarity and GEPA optimization:
+/// - Each field has a distinct purpose
+/// - GEPA can optimize field descriptions independently
+/// - No XML parsing needed - clean structured data
 #[derive(dspy_rs::Signature, Clone, Debug)]
 pub struct AgentResponse {
-    #[input(desc = "The input to respond to - either a user message or tool execution result")]
+    #[input(desc = "The user message or tool result to respond to")]
     pub input: String,
 
+    #[input(desc = "Current date and time in user's timezone")]
+    pub current_time: String,
+
+    #[input(desc = "Your persona - who you are, your personality and style")]
+    pub persona_block: String,
+
+    #[input(desc = "What you know about this human - name, preferences, facts")]
+    pub human_block: String,
+
+    #[input(desc = "Memory stats: message count in recall, archival count, last modified")]
+    pub memory_metadata: String,
+
     #[input(
-        desc = "Compacted summary of very old messages (only present for long conversations). Ignore if empty."
+        desc = "Summary of older conversation if context was compacted. Ignore if empty."
     )]
     pub previous_context_summary: String,
 
-    #[input(desc = "Recent conversation history including your messages and tool results")]
-    pub conversation_context: String,
+    #[input(desc = "Recent messages between you and the user")]
+    pub recent_conversation: String,
 
-    #[input]
+    #[input(desc = "Available tools and their descriptions")]
     pub available_tools: String,
+
+    #[input(desc = "Is this the first conversation with this user?")]
+    pub is_first_time_user: bool,
 
     #[output(desc = "Your reasoning/thought process (think step by step)")]
     pub reasoning: String,
@@ -110,25 +130,28 @@ CRITICAL: Do NOT include <think> or </think> tags - use ONLY the [[ ## field ## 
 pub const AGENT_INSTRUCTION: &str = r#"You are Sage, a helpful AI assistant communicating via Signal.
 
 MEMORY SYSTEM:
-You have full control over your memory. Use it proactively and autonomously:
+You have two types of memory. Use them proactively:
 
-- **Core Memory Blocks** (<persona>, <human>): Always in your context. Edit anytime to maintain accurate information.
-  - `memory_append`: Add new info to a block
-  - `memory_replace`: Update/correct existing info (requires exact text match)
-  - `memory_insert`: Insert at specific line
-  
-- **Archival Memory**: Long-term storage for important facts, preferences, details worth remembering.
-  - `archival_insert`: Store information (silently, no need to announce)
-  - `archival_search`: Search past memories semantically
-  
-- **Conversation Search**: Search through past conversation history.
-  - `conversation_search`: Find past discussions
+**Core Memory** (always visible to you):
+- The <persona> and <human> blocks are ALWAYS in your context
+- Use for essential, frequently-needed info: name, job, key preferences, current projects
+- Tools: `memory_append`, `memory_replace`, `memory_insert`
+- Rule: "Will I need this in EVERY conversation?" → Core Memory
 
-MEMORY AGENCY:
-- Update memory blocks whenever you learn something worth remembering
-- Store to archival memory proactively - don't wait to be asked
+**Archival Memory** (searchable long-term storage):
+- NOT visible until you search - unlimited storage for details
+- Use for: life events, stories, specific preferences, things worth remembering later
+- Tools: `archival_insert` (store), `archival_search` (retrieve)
+- Rule: "Might I want to recall this detail someday?" → Archival Memory
+
+**Conversation History**:
+- `conversation_search`: Find past discussions by keyword/topic
+
+MEMORY TIPS:
+- Core = small & critical (name, job, active context)
+- Archival = rich & detailed (birthday, pet's name, trip stories, food preferences)
 - Memory operations are SILENT - don't announce them to the user
-- You can edit memory at ANY point in the conversation, not just when explicitly asked
+- Update memory proactively whenever you learn something worth remembering
 
 COMMUNICATION STYLE:
 You communicate via Signal chat. Adapt your message format to the content:
@@ -173,6 +196,19 @@ CRITICAL FORMAT RULES:
 - Do NOT repeat field tags. Wrong: multiple [[ ## messages ## ]] blocks. Right: one messages array with all items.
 - Do NOT include <think> or </think> tags in your output - use ONLY the [[ ## field ## ]] format specified above.
 - Keep your output clean and strictly follow the field delimiters."#;
+
+/// Context fields for building the agent input
+/// Each field maps to a separate input in the AgentResponse signature
+#[derive(Clone, Debug, Default)]
+pub struct AgentContext {
+    pub current_time: String,
+    pub persona_block: String,
+    pub human_block: String,
+    pub memory_metadata: String,
+    pub previous_context_summary: String,
+    pub recent_conversation: String,
+    pub is_first_time_user: bool,
+}
 
 /// Result of executing a tool
 #[derive(Clone, Debug)]
@@ -421,73 +457,73 @@ impl SageAgent {
     }
 
     /// Build conversation context from database + current tool results
-    /// Returns (previous_context_summary, conversation_context, is_first_time_user)
-    fn build_context(&self, _current_user_message: &str) -> (String, String, bool) {
-        let mut context = String::new();
-        let mut previous_summary = String::new();
-        let mut is_first_time_user = false;
+    /// Returns AgentContext with all fields separated for the signature
+    fn build_context(&self) -> AgentContext {
+        let mut ctx = AgentContext::default();
 
-        // Add current time at the top
-        // Use user's preferred timezone if set, otherwise UTC
+        // Current time in user's timezone
         let now = chrono::Utc::now();
         if let Some(memory) = &self.memory {
             if let Ok(Some(tz)) = memory.get_timezone() {
                 let local_time = now.with_timezone(&tz);
-                context.push_str(&format!(
-                    "Current time: {} ({})\n\n",
+                ctx.current_time = format!(
+                    "{} ({})",
                     local_time.format("%m/%d/%Y %H:%M:%S (%A)"),
                     tz.name()
-                ));
+                );
             } else {
-                context.push_str(&format!(
-                    "Current time: {} UTC\n\n",
-                    now.format("%m/%d/%Y %H:%M:%S (%A)")
-                ));
+                ctx.current_time = format!("{} UTC", now.format("%m/%d/%Y %H:%M:%S (%A)"));
             }
         } else {
-            context.push_str(&format!(
-                "Current time: {} UTC\n\n",
-                now.format("%m/%d/%Y %H:%M:%S (%A)")
-            ));
+            ctx.current_time = format!("{} UTC", now.format("%m/%d/%Y %H:%M:%S (%A)"));
         }
 
-        // Include memory blocks if available
+        // Extract memory blocks and metadata
         if let Some(memory) = &self.memory {
-            let memory_xml = memory.compile();
-            if !memory_xml.is_empty() {
-                context.push_str(&memory_xml);
-                context.push_str("\n\n");
+            // Get individual block values (without XML wrapper)
+            if let Some(persona) = memory.blocks().get("persona") {
+                ctx.persona_block = persona.value.clone();
             }
+            if let Some(human) = memory.blocks().get("human") {
+                ctx.human_block = human.value.clone();
+            }
+
+            // Memory metadata (counts and timestamps)
+            ctx.memory_metadata = memory.compile_metadata();
         }
 
-        // Load conversation history with smart context management
+        // Load conversation history
+        let mut conversation = String::new();
         let mut has_history = false;
+
         if let Some(memory) = &self.memory {
-            // Get user's timezone preference for formatting
             let user_tz = memory.get_timezone().ok().flatten();
 
-            // Use new context management: get summary + messages
             if let Ok((summary, messages)) = memory.get_context_messages() {
-                // Get previous summary content (empty if none)
-                if let Some(s) = summary {
-                    previous_summary = s.content;
+                // First-time user check (before moving values)
+                let msg_count = messages.len();
+                let has_summary = summary.is_some();
+                if msg_count <= 1 && !has_summary {
+                    ctx.is_first_time_user = true;
                 }
 
-                // Add messages to context
+                // Previous context summary
+                if let Some(s) = summary {
+                    ctx.previous_context_summary = s.content;
+                }
+
+                // Recent messages
                 if !messages.is_empty() {
                     has_history = true;
-                    context.push_str("Recent conversation:\n");
-                    for msg in messages {
-                        // Format timestamp in user's timezone if set, otherwise UTC
+                    for msg in &messages {
                         let timestamp = if let Some(tz) = user_tz {
                             let local_time = msg.created_at.with_timezone(&tz);
                             format!("{} ({})", local_time.format("%m/%d/%Y %H:%M:%S"), tz.name())
                         } else {
                             format!("{} UTC", msg.created_at.format("%m/%d/%Y %H:%M:%S"))
                         };
-                        // Truncate tool messages to 2k chars for display (full content stored in DB)
+                        // Truncate tool messages to 2k chars
                         let content = if msg.role == "tool" && msg.content.len() > 2000 {
-                            // Find a valid UTF-8 char boundary near 2000
                             let mut end = 2000;
                             while !msg.content.is_char_boundary(end) && end > 0 {
                                 end -= 1;
@@ -496,35 +532,27 @@ impl SageAgent {
                         } else {
                             msg.content.clone()
                         };
-                        context.push_str(&format!("[{} @ {}]: {}\n", msg.role, timestamp, content));
+                        conversation.push_str(&format!("[{} @ {}]: {}\n", msg.role, timestamp, content));
                     }
                 }
             }
         }
 
-        // Add any tool results from current request cycle (no timestamp, they're happening now)
+        // Add current tool results (not yet persisted)
         for msg in &self.current_tool_results {
-            if !has_history {
-                context.push_str("Recent conversation:\n");
+            if !has_history && conversation.is_empty() {
                 has_history = true;
             }
-            context.push_str(&format!("[{}]: {}\n", msg.role, msg.content));
+            conversation.push_str(&format!("[{}]: {}\n", msg.role, msg.content));
         }
 
-        if !has_history {
-            context.push_str("No previous conversation.");
+        if conversation.is_empty() {
+            ctx.recent_conversation = "No previous conversation.".to_string();
+        } else {
+            ctx.recent_conversation = conversation;
         }
 
-        // First-time user = only 1 message (the current one) and no summary
-        if let Some(memory) = &self.memory {
-            if let Ok((summary, messages)) = memory.get_context_messages() {
-                if messages.len() <= 1 && summary.is_none() {
-                    is_first_time_user = true;
-                }
-            }
-        }
-
-        (previous_summary, context, is_first_time_user)
+        ctx
     }
 
     /// Inject tool result into current request cycle (not persisted to DB)
@@ -608,9 +636,14 @@ impl SageAgent {
         // Convert CorrectionResponse to AgentResponse
         Ok(AgentResponse {
             input: original_input.to_string(),
+            current_time: String::new(),
+            persona_block: String::new(),
+            human_block: String::new(),
+            memory_metadata: String::new(),
             previous_context_summary: String::new(),
-            conversation_context: String::new(),
+            recent_conversation: String::new(),
             available_tools: available_tools.to_string(),
+            is_first_time_user: false,
             reasoning: corrected.reasoning,
             messages: corrected.messages,
             tool_calls: corrected.tool_calls,
@@ -632,24 +665,12 @@ impl SageAgent {
             .instruction(AGENT_INSTRUCTION)
             .build();
 
-        // Build typed input - loads history from database with smart context management
-        let (previous_context_summary, conversation_context, is_first_time_user) =
-            self.build_context(user_message);
+        // Build context - separate fields for each input
+        let ctx = self.build_context();
 
         // Input is either the user message (first step) or ALL tool results from this cycle
         let input_content = if is_first_step {
-            // Special welcome message for first-time users
-            if is_first_time_user {
-                format!(
-                    "[FIRST TIME USER - This is your very first conversation with this person! \
-                    Welcome them warmly like meeting a new friend. Introduce yourself briefly, \
-                    ask for their name, and let them know you're here to help. Be friendly and \
-                    personable - this sets the tone for your entire relationship.]\n\n{}",
-                    user_message
-                )
-            } else {
-                user_message.to_string()
-            }
+            user_message.to_string()
         } else {
             // Collect ALL tool results from current cycle
             let tool_results: Vec<&str> = self
@@ -662,7 +683,7 @@ impl SageAgent {
             if tool_results.is_empty() {
                 user_message.to_string()
             } else {
-                // Build summary of what was already sent this turn, including the actual messages
+                // Build summary of what was already sent this turn
                 let already_sent = if let Some((sent_messages, tool_names)) =
                     &self.previous_step_summary
                 {
@@ -688,7 +709,7 @@ impl SageAgent {
 
 === TOOL RESULT PROCESSING MODE ===
 This is a CONTINUATION of your previous turn, NOT a new conversation.
-Your previous messages are already visible to the user in conversation_context.
+Your previous messages are already visible to the user in recent_conversation.
 
 RULES:
 1. SILENCE IS DEFAULT - You do NOT need to acknowledge the tool result
@@ -720,8 +741,7 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
                     )
                 };
 
-                // Clear tool results after presenting them - they've been shown to the LLM
-                // New tool calls this step will add fresh results
+                // Clear tool results after presenting them
                 self.current_tool_results.clear();
 
                 result
@@ -730,19 +750,21 @@ SELF-CHECK: Before ANY message, ask: "Is this new info the user hasn't seen?" If
 
         tracing::info!("=== LLM REQUEST ===");
         tracing::info!("Tool results in cycle: {}", self.current_tool_results.len());
-        tracing::info!(
-            "Has previous context summary: {}",
-            !previous_context_summary.is_empty()
-        );
+        tracing::info!("Is first time user: {}", ctx.is_first_time_user);
         tracing::info!("Input: {}", input_content);
-        tracing::info!("Conversation context:\n{}", conversation_context);
+        tracing::info!("Recent conversation:\n{}", ctx.recent_conversation);
 
         let available_tools = self.tools.generate_description();
         let input = AgentResponseInput {
             input: input_content.clone(),
-            previous_context_summary,
-            conversation_context,
+            current_time: ctx.current_time,
+            persona_block: ctx.persona_block,
+            human_block: ctx.human_block,
+            memory_metadata: ctx.memory_metadata,
+            previous_context_summary: ctx.previous_context_summary,
+            recent_conversation: ctx.recent_conversation,
             available_tools: available_tools.clone(),
+            is_first_time_user: ctx.is_first_time_user,
         };
 
         // Get typed response from LLM with retry logic (up to 3 attempts)
