@@ -60,8 +60,8 @@
           pkgs.just
           
           # Services
-          pkgs.postgresql
-          pkgs.postgresql.pkgs.pgvector  # Vector similarity search extension
+          # PostgreSQL with pgvector extension bundled
+          (pkgs.postgresql.withPackages (ps: [ ps.pgvector ]))
           pkgs.valkey
           signal-cli-pkg
         ];

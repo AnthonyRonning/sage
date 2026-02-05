@@ -1,5 +1,13 @@
 -- Enable pgvector extension for vector similarity search
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Note: This may fail if pgvector was installed manually (not via CREATE EXTENSION)
+-- In that case, the vector type should already exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
+        CREATE EXTENSION IF NOT EXISTS vector;
+    END IF;
+END
+$$;
 
 -- Archival memory passages table
 -- Stores long-term memories with embeddings for semantic search

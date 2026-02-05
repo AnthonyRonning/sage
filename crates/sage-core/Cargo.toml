@@ -4,9 +4,17 @@ version.workspace = true
 edition.workspace = true
 default-run = "sage"
 
+[lib]
+name = "sage_core"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sage"
 path = "src/main.rs"
+
+[[bin]]
+name = "gepa-optimize"
+path = "src/bin/gepa_optimize.rs"
 
 [dependencies]
 sage-tools = { path = "../sage-tools" }

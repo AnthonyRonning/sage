@@ -153,28 +153,23 @@ impl MemoryManager {
         let archival_count = self.archival.passage_count();
         let last_modified = self.blocks.last_modified();
 
-        let mut s = String::from("<memory_metadata>\n");
-        s.push_str(&format!(
-            "- The current system date is: {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z")
-        ));
+        let mut s = String::new();
 
         if let Some(modified) = last_modified {
             s.push_str(&format!(
-                "- Memory blocks were last modified: {}\n",
+                "- Memory blocks last modified: {}\n",
                 modified.format("%Y-%m-%d %H:%M:%S %Z")
             ));
         }
 
         s.push_str(&format!(
-            "- {} previous messages between you and the user are stored in recall memory (use conversation_search to access)\n",
+            "- {} messages in recall memory (use conversation_search to access)\n",
             recall_count
         ));
         s.push_str(&format!(
-            "- {} total memories you created are stored in archival memory (use archival_search to access)\n",
+            "- {} passages in archival memory (use archival_search to access)",
             archival_count
         ));
-        s.push_str("</memory_metadata>");
 
         s
     }

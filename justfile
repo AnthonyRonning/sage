@@ -227,3 +227,29 @@ ci-check:
     cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test --all-features
+
+# =============================================================================
+# GEPA Prompt Optimization
+# =============================================================================
+
+# Evaluate current AGENT_INSTRUCTION against training examples (baseline score)
+gepa-eval:
+    cargo run --release --bin gepa-optimize -- --eval
+
+# Run GEPA optimization loop (Claude as judge, Kimi as program)
+# Requires ANTHROPIC_API_KEY env var for Claude judge
+gepa-optimize:
+    cargo run --release --bin gepa-optimize -- --optimize
+
+# Show current optimized instruction
+gepa-show:
+    @cat optimized_instructions/latest.txt 2>/dev/null || echo "No optimized instruction found. Run 'just gepa-optimize' first."
+
+# Show GEPA training examples
+gepa-examples:
+    @echo "GEPA training examples in examples/gepa/trainset.json"
+    @echo ""
+    @echo "Categories:"
+    @grep -o '"category": "[^"]*"' examples/gepa/trainset.json | sort | uniq -c
+    @echo ""
+    @echo "Total examples: $(grep -c '"id":' examples/gepa/trainset.json)"
