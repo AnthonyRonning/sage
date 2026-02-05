@@ -200,6 +200,48 @@
       "bad_patterns": ["overly long response", "asking follow-up questions unnecessarily"]
     },
     {
+      "id": "user_introduces_name",
+      "category": "memory_storage",
+      "input": "My name is anthony, nice to meet you. what kinds of things can you help me with?",
+      "current_time": "02/05/2026 06:39:19 (Thursday) UTC",
+      "persona_block": "I am Sage, a helpful AI assistant communicating via Signal. I maintain long-term memory across our conversations and strive to be friendly, concise, and genuinely helpful.",
+      "human_block": "",
+      "memory_metadata": "- 6 messages in recall memory (use conversation_search to access)\n- 0 passages in archival memory (use archival_search to access)",
+      "previous_context_summary": "",
+      "recent_conversation": "[user @ 02/05/2026 06:38:54 UTC]: hello\n[assistant @ 02/05/2026 06:39:05 UTC]: Hey there! 👋\n[assistant @ 02/05/2026 06:39:05 UTC]: I'm Sage, your AI assistant.\n[assistant @ 02/05/2026 06:39:05 UTC]: I can help with all sorts of things and I remember our conversations over time.\n[assistant @ 02/05/2026 06:39:05 UTC]: What's your name?\n[user @ 02/05/2026 06:39:19 UTC]: My name is anthony, nice to meet you. what kinds of things can you help me with?",
+      "is_first_time_user": false,
+      "expected_behavior": "User just told us their name AND asked a question. Store name to human block with memory_append, respond with capabilities overview. Multiple casual messages.",
+      "expected_response_type": "acknowledge_and_store",
+      "expected_tools": ["memory_append"],
+      "should_store_memory": true,
+      "good_response": {
+        "messages": ["Nice to meet you, Anthony! 😊", "I can help with lots of things—here are some examples:", "• Answering questions and explaining topics\n• Web search for current info, weather, news\n• Coding and technical problems\n• Writing, editing, and brainstorming\n• Scheduling reminders for later\n• Remembering things about you (like your name!) for future chats", "What brings you here today?"],
+        "tool_calls": [{"name": "memory_append", "args": {"block": "human", "content": "Name: Anthony"}}]
+      },
+      "bad_patterns": ["not storing the name", "announcing that memory was saved", "single long message instead of multiple casual ones"]
+    },
+    {
+      "id": "memory_append_done_silent",
+      "category": "memory_operation_done",
+      "input": "[Tool Result: memory_append]\nArgs: block=human, content=Name: Anthony\nStatus: OK\nOutput: Successfully appended to 'human' block.",
+      "current_time": "02/05/2026 06:39:29 (Thursday) UTC",
+      "persona_block": "I am Sage, a helpful AI assistant communicating via Signal. I maintain long-term memory across our conversations and strive to be friendly, concise, and genuinely helpful.",
+      "human_block": "Name: Anthony",
+      "memory_metadata": "- Memory blocks last modified: 2026-02-05 06:39:25 UTC\n- 10 messages in recall memory (use conversation_search to access)\n- 0 passages in archival memory (use archival_search to access)",
+      "previous_context_summary": "",
+      "recent_conversation": "[user @ 02/05/2026 06:38:54 UTC]: hello\n[assistant @ 02/05/2026 06:39:05 UTC]: Hey there! 👋\n[assistant @ 02/05/2026 06:39:05 UTC]: I'm Sage, your AI assistant.\n[assistant @ 02/05/2026 06:39:05 UTC]: I can help with all sorts of things and I remember our conversations over time.\n[assistant @ 02/05/2026 06:39:05 UTC]: What's your name?\n[user @ 02/05/2026 06:39:19 UTC]: My name is anthony, nice to meet you. what kinds of things can you help me with?\n[assistant @ 02/05/2026 06:39:29 UTC]: Nice to meet you, Anthony! 😊\n[assistant @ 02/05/2026 06:39:29 UTC]: I can help with lots of things—here are some examples:\n[assistant @ 02/05/2026 06:39:29 UTC]: • Answering questions and explaining topics\n• Web search for current info, weather, news\n• Coding and technical problems\n• Writing, editing, and brainstorming\n• Scheduling reminders for later\n• Remembering things about you (like your name!) for future chats\n[assistant @ 02/05/2026 06:39:29 UTC]: What brings you here today?\n[tool]: [Tool Result: memory_append] Successfully appended to 'human' block.",
+      "is_first_time_user": false,
+      "expected_behavior": "Memory operation completed successfully. Messages already sent. Return done immediately with no messages. Memory ops are silent.",
+      "expected_response_type": "silent_done",
+      "expected_tools": ["done"],
+      "should_store_memory": false,
+      "good_response": {
+        "messages": [],
+        "tool_calls": [{"name": "done", "args": {}}]
+      },
+      "bad_patterns": ["sending any message", "announcing memory was saved", "calling any tool other than done", "saying 'I stored your name'"]
+    },
+    {
       "id": "memory_update_correction",
       "category": "memory_storage",
       "input": "Actually, I moved to Seattle, not Portland",
