@@ -134,92 +134,31 @@ conversation_search: Search past conversations. Args: {"query": "..."}
 done: Signal nothing more to do. Args: {}"#;
 
 fn load_trainset() -> Vec<TrainingExample> {
-    vec![
-        // First-time user greeting - should ask for name
-        TrainingExample {
-            input: "hello".into(),
-            current_time: "02/05/2026 04:40:30 (Thursday) UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "".into(),
-            memory_metadata: "0 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "".into(),
-            is_first_time_user: true,
-            expected_behavior: "Ask for user's name, multiple casual messages".into(),
-        },
-        // Known user casual greeting
-        TrainingExample {
-            input: "hey!".into(),
-            current_time: "02/05/2026 10:00:00 UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "Name: Tony\nJob: Software engineer".into(),
-            memory_metadata: "5 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "".into(),
-            is_first_time_user: false,
-            expected_behavior: "Casual greeting, multiple short messages, use name".into(),
-        },
-        // Thanks response
-        TrainingExample {
-            input: "Thanks!".into(),
-            current_time: "02/05/2026 10:05:00 UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "Name: Tony".into(),
-            memory_metadata: "5 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "[user]: Can you help me?\n[assistant]: Sure!".into(),
-            is_first_time_user: false,
-            expected_behavior: "Casual acknowledgment, multiple short messages".into(),
-        },
-        // Web search needed
-        TrainingExample {
-            input: "What's the latest news about Bitcoin?".into(),
-            current_time: "02/05/2026 10:10:00 UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "Name: Tony".into(),
-            memory_metadata: "5 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "".into(),
-            is_first_time_user: false,
-            expected_behavior: "Use web_search tool for current info".into(),
-        },
-        // Memory storage - new job
-        TrainingExample {
-            input: "I just got a new job at Google!".into(),
-            current_time: "02/05/2026 10:15:00 UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "Name: Tony\nJob: Software engineer at Startup".into(),
-            memory_metadata: "5 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "".into(),
-            is_first_time_user: false,
-            expected_behavior: "Congratulate, use memory_append AND archival_insert for major life event".into(),
-        },
-        // After tool result - silent done
-        TrainingExample {
-            input: "[Tool Result: memory_append] Success: Added to human block".into(),
-            current_time: "02/05/2026 10:20:00 UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "Name: Tony\nJob: Engineer at Google".into(),
-            memory_metadata: "6 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "[user]: I got a job at Google!\n[assistant]: Congrats!".into(),
-            is_first_time_user: false,
-            expected_behavior: "Silent done - no message needed after memory operation".into(),
-        },
-        // Archival search
-        TrainingExample {
-            input: "What do you remember about my trip to Japan?".into(),
-            current_time: "02/05/2026 10:25:00 UTC".into(),
-            persona_block: "I am Sage, a helpful AI assistant.".into(),
-            human_block: "Name: Tony".into(),
-            memory_metadata: "10 archival memories".into(),
-            previous_context_summary: "".into(),
-            recent_conversation: "".into(),
-            is_first_time_user: false,
-            expected_behavior: "Use archival_search to find trip memories".into(),
-        },
-    ]
+    // Load from JSON file
+    let json_path = std::path::Path::new("examples/gepa/trainset.json");
+    if json_path.exists() {
+        let content = std::fs::read_to_string(json_path).expect("Failed to read trainset.json");
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Failed to parse trainset.json");
+        
+        let examples = json["examples"].as_array().expect("No examples array");
+        return examples.iter().map(|e| {
+            TrainingExample {
+                input: e["input"].as_str().unwrap_or("").to_string(),
+                current_time: e["current_time"].as_str().unwrap_or("").to_string(),
+                persona_block: e["persona_block"].as_str().unwrap_or("").to_string(),
+                human_block: e["human_block"].as_str().unwrap_or("").to_string(),
+                memory_metadata: e["memory_metadata"].as_str().unwrap_or("").to_string(),
+                previous_context_summary: e["previous_context_summary"].as_str().unwrap_or("").to_string(),
+                recent_conversation: e["recent_conversation"].as_str().unwrap_or("").to_string(),
+                is_first_time_user: e["is_first_time_user"].as_bool().unwrap_or(false),
+                expected_behavior: e["expected_behavior"].as_str().unwrap_or("").to_string(),
+            }
+        }).collect();
+    }
+    
+    // Fallback if file doesn't exist
+    eprintln!("Warning: examples/gepa/trainset.json not found, using empty trainset");
+    vec![]
 }
 
 // ============================================================================
