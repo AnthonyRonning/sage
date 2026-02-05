@@ -4,7 +4,6 @@
 
 pub mod agent_manager;
 pub mod config;
-pub mod gepa;
 pub mod memory;
 pub mod sage_agent;
 pub mod scheduler;

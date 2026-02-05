@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 mod agent_manager;
 mod config;
-mod gepa;
 mod memory;
 mod sage_agent;
 mod scheduler;
