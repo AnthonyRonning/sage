@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 default-run = "sage"
 
+[lib]
+name = "sage_core"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sage"
 path = "src/main.rs"

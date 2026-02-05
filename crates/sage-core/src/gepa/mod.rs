@@ -27,9 +27,9 @@
 // Allow dead code - this module is experimental and not yet fully integrated
 #![allow(dead_code)]
 
-mod dataset;
-mod evaluator;
-mod module;
+pub mod dataset;
+pub mod evaluator;
+pub mod module;
 
 #[allow(unused_imports)]
 pub use dataset::*;

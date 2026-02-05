@@ -72,11 +72,23 @@ impl GepaSageModule {
             .instruction(&self.instruction)
             .build();
 
-        // Prepare input
+        // Prepare input - use new fields or fall back to legacy conversation_context
+        let conversation_context = example.conversation_context.clone().unwrap_or_else(|| {
+            // Build from new fields
+            format!(
+                "Current time: {}\n\nPersona: {}\n\nHuman: {}\n\nMemory: {}\n\nRecent conversation:\n{}",
+                example.current_time,
+                example.persona_block,
+                example.human_block,
+                example.memory_metadata,
+                example.recent_conversation
+            )
+        });
+
         let input = GepaAgentResponseInput {
             input: example.input.clone(),
             previous_context_summary: example.previous_context_summary.clone(),
-            conversation_context: example.conversation_context.clone(),
+            conversation_context,
             available_tools: GEPA_TOOLS_DESCRIPTION.to_string(),
         };
 

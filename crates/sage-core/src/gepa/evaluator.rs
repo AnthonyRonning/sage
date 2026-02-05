@@ -430,13 +430,21 @@ mod tests {
             id: "test".to_string(),
             category: "test".to_string(),
             input: "Test input".to_string(),
+            current_time: "".to_string(),
+            persona_block: "".to_string(),
+            human_block: "".to_string(),
+            memory_metadata: "".to_string(),
             previous_context_summary: "".to_string(),
-            conversation_context: "".to_string(),
+            recent_conversation: "".to_string(),
+            is_first_time_user: false,
             expected_behavior: "Test".to_string(),
             expected_response_type: response_type.to_string(),
             expected_tools: expected_tools.into_iter().map(String::from).collect(),
             should_store_memory: should_store,
+            good_response: None,
+            bad_response: None,
             bad_patterns: vec![],
+            conversation_context: None,
         }
     }
 
@@ -493,4 +501,29 @@ mod tests {
         let result2 = evaluate_rule_based(&example, &response2);
         assert!(result2.component_scores.memory > 0.15);
     }
+}
+
+/// Simplified evaluation function for use with production AgentResponse
+/// 
+/// Takes messages and tool names directly (extracted from AgentResponse)
+pub fn evaluate_response(
+    example: &GepaExample,
+    messages: &[String],
+    tool_names: &[String],
+) -> EvaluationResult {
+    // Convert to ParsedResponse format
+    let response = ParsedResponse {
+        reasoning: String::new(),
+        messages: messages.to_vec(),
+        tool_calls: tool_names
+            .iter()
+            .map(|name| ParsedToolCall {
+                name: name.clone(),
+                args: std::collections::HashMap::new(),
+            })
+            .collect(),
+        parse_error: None,
+    };
+
+    evaluate_rule_based(example, &response)
 }
