@@ -31,11 +31,12 @@ services:
       start_period: 10s
 
   # signal-cli daemon for Signal messaging
-  # Uses official native image with embedded libsignal
+  # Uses JRE image for reliability (native/GraalVM image has known issues with
+  # message delivery - see https://github.com/AnthonyRonning/sage/issues/4)
   signal-cli:
-    image: registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest
+    image: registry.gitlab.com/packaging/signal-cli/signal-cli-jre:latest
     container_name: sage-signal-cli
-    command: ["daemon", "--tcp", "0.0.0.0:7583", "--send-read-receipts"]
+    command: ["daemon", "--tcp", "0.0.0.0:7583", "--send-read-receipts", "--ignore-stories"]
     ports:
       - "7583:7583"
     volumes:

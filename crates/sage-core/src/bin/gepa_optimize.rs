@@ -9,7 +9,9 @@
 
 use anyhow::Result;
 use dspy_rs::{configure, ChatAdapter, FeedbackMetric, Predict, Signature, LM};
-use sage_core::{AgentResponse, AgentResponseInput, AGENT_INSTRUCTION};
+use sage_core::{
+    canonical_tool_descriptions, AgentResponse, AgentResponseInput, AGENT_INSTRUCTION,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -134,15 +136,6 @@ struct TrainingExample {
     expected_behavior: String,
 }
 
-const TOOLS_DESC: &str = r#"Available tools:
-web_search: Search the web. Args: {"query": "..."}
-memory_append: Add to memory block. Args: {"block": "human|persona", "content": "..."}
-memory_replace: Replace text in memory block. Args: {"block": "...", "old": "...", "new": "..."}
-archival_insert: Store in archival memory. Args: {"content": "..."}
-archival_search: Search archival memory. Args: {"query": "..."}
-conversation_search: Search past conversations. Args: {"query": "..."}
-done: Signal nothing more to do. Args: {}"#;
-
 fn load_trainset() -> Vec<TrainingExample> {
     // Load from JSON file
     let json_path = std::path::Path::new("examples/gepa/trainset.json");
@@ -229,7 +222,7 @@ async fn run_evaluation_async() -> Result<()> {
             memory_metadata: example.memory_metadata.clone(),
             previous_context_summary: example.previous_context_summary.clone(),
             recent_conversation: example.recent_conversation.clone(),
-            available_tools: TOOLS_DESC.to_string(),
+            available_tools: canonical_tool_descriptions(),
             is_first_time_user: example.is_first_time_user,
         };
 
@@ -613,7 +606,7 @@ async fn evaluate_instruction(
             memory_metadata: example.memory_metadata.clone(),
             previous_context_summary: example.previous_context_summary.clone(),
             recent_conversation: example.recent_conversation.clone(),
-            available_tools: TOOLS_DESC.to_string(),
+            available_tools: canonical_tool_descriptions(),
             is_first_time_user: example.is_first_time_user,
         };
 

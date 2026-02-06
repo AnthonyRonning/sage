@@ -17,4 +17,4 @@ pub mod tools;
 // Re-export key types for convenience
 pub use config::Config;
 pub use sage_agent::{AgentResponse, AgentResponseInput, ToolCall, AGENT_INSTRUCTION};
-pub use tools::{DoneTool, WebSearchTool};
+pub use tools::{canonical_tool_descriptions, DoneTool, WebSearchTool};
