@@ -9,9 +9,6 @@ pub struct Config {
     pub maple_embedding_model: String,
     pub maple_vision_model: String,
 
-    pub letta_api_url: String,
-
-    pub valkey_url: String,
     pub database_url: String,
 
     pub signal_phone_number: Option<String>,
@@ -41,11 +38,6 @@ impl Config {
                 std::env::var("MAPLE_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string())
             }),
 
-            letta_api_url: std::env::var("LETTA_API_URL")
-                .unwrap_or_else(|_| "http://localhost:8283".to_string()),
-
-            valkey_url: std::env::var("VALKEY_URL")
-                .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
             database_url: std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
 
             signal_phone_number: std::env::var("SIGNAL_PHONE_NUMBER").ok(),

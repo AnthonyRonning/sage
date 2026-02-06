@@ -3,10 +3,8 @@
 //! Tools are organized by category:
 //! - brave: Brave Search API client
 //! - web_search: Web search tool using Brave
-//! - filesystem: File and directory operations
 
 pub mod brave;
-pub mod filesystem;
 pub mod web_search;
 
 pub use brave::{BraveClient, SearchOptions, SearchResponse};

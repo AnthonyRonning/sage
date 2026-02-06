@@ -9,14 +9,12 @@
 //! All conversation history is stored with embeddings for semantic search.
 //! Uses PostgreSQL with pgvector for efficient similarity queries.
 
-mod archival;
 mod archival_new;
 mod block;
 mod compaction;
 mod context;
 mod db;
 mod embedding;
-mod recall;
 mod recall_new;
 mod tools;
 
