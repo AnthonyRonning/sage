@@ -10,6 +10,7 @@ Sage is an AI assistant that prioritizes **privacy** and **data sovereignty**. I
 
 **Key Features:**
 - **End-to-end encrypted messaging** via Signal
+- **Image understanding** - send photos and Sage can see and describe them
 - **Long-term memory** that persists across conversations
 - **Confidential compute** - LLM inference runs in a TEE (Trusted Execution Environment)
 - **Self-hosted** - all data stays on your machine
@@ -338,8 +339,9 @@ MAPLE_MODEL=maple/kimi-k2-5
 SIGNAL_PHONE_NUMBER=+1234567890
 
 # Optional
-BRAVE_API_KEY=your-brave-key  # For web search
-SIGNAL_ALLOWED_USERS=*        # Or comma-separated UUIDs
+BRAVE_API_KEY=your-brave-key          # For web search
+MAPLE_VISION_MODEL=maple/kimi-k2-5   # For image understanding (defaults to MAPLE_MODEL)
+SIGNAL_ALLOWED_USERS=*                # Or comma-separated UUIDs
 ```
 
 ## Architecture
@@ -380,6 +382,7 @@ SIGNAL_ALLOWED_USERS=*        # Or comma-separated UUIDs
 
 **Working:**
 - Multi-user conversations with memory isolation
+- Image understanding (send photos via Signal)
 - Web search, shell commands, scheduling
 - Auto-reconnect on Signal connection drops
 - Context compaction when approaching limits
