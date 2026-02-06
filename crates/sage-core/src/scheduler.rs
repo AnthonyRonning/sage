@@ -542,7 +542,6 @@ pub fn spawn_scheduler(
 }
 
 /// Complete a task after successful execution
-#[allow(dead_code)]
 pub fn complete_task(scheduler_db: &SchedulerDb, task: &ScheduledTask) -> Result<()> {
     if let Some(ref cron_expr) = task.cron_expression {
         // Recurring task - calculate next run time
@@ -562,7 +561,6 @@ pub fn complete_task(scheduler_db: &SchedulerDb, task: &ScheduledTask) -> Result
 }
 
 /// Mark a task as failed
-#[allow(dead_code)]
 pub fn fail_task(scheduler_db: &SchedulerDb, task: &ScheduledTask, error: &str) -> Result<()> {
     scheduler_db.mark_failed(task.id, error)?;
     tracing::error!("Task '{}' failed: {}", task.description, error);

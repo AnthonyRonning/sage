@@ -247,16 +247,33 @@ async fn main() -> Result<()> {
                 };
 
                 // Handle different task types based on payload
-                match &task.payload {
+                let task_result: Result<(), String> = match &task.payload {
                     scheduler::TaskPayload::Message(msg_payload) => {
                         info!("📤 Sending scheduled message to {}: {}", signal_identifier, msg_payload.message);
                         let client = signal_client.lock().await;
                         if let Err(e) = client.send_message(&signal_identifier, &msg_payload.message) {
-                            error!("Failed to send scheduled message: {}", e);
+                            Err(format!("Failed to send scheduled message: {}", e))
+                        } else {
+                            Ok(())
                         }
                     }
                     scheduler::TaskPayload::ToolCall(tool_payload) => {
-                        warn!("Tool call scheduled tasks not yet implemented: {:?}", tool_payload);
+                        Err(format!("Tool call scheduled tasks not yet implemented: {:?}", tool_payload))
+                    }
+                };
+
+                // Update task status based on result
+                match task_result {
+                    Ok(()) => {
+                        if let Err(e) = scheduler::complete_task(&scheduler_db, &task) {
+                            error!("Failed to mark task {} as completed: {}", task.id, e);
+                        }
+                    }
+                    Err(err) => {
+                        error!("{}", err);
+                        if let Err(e) = scheduler::fail_task(&scheduler_db, &task, &err) {
+                            error!("Failed to mark task {} as failed: {}", task.id, e);
+                        }
                     }
                 }
             }
