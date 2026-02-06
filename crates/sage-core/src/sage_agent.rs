@@ -293,6 +293,29 @@ pub trait Tool: Send + Sync {
     async fn execute(&self, args: &HashMap<String, String>) -> Result<ToolResult>;
 }
 
+/// Description-only Tool stub for generating prompt text without live backends.
+struct ToolDescriptor {
+    name: String,
+    description: String,
+    args_schema: String,
+}
+
+#[async_trait::async_trait]
+impl Tool for ToolDescriptor {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn args_schema(&self) -> &str {
+        &self.args_schema
+    }
+    async fn execute(&self, _args: &HashMap<String, String>) -> Result<ToolResult> {
+        unreachable!("ToolDescriptor is description-only and should never be executed")
+    }
+}
+
 /// Registry of available tools
 pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
@@ -325,7 +348,6 @@ impl ToolRegistry {
         }
 
         let mut desc = String::from("Available tools (add to tool_calls array to use):\n\n");
-
         for tool in self.tools.values() {
             desc.push_str(&format!(
                 "{}:\n  Description: {}\n  Args: {}\n\n",
@@ -334,8 +356,101 @@ impl ToolRegistry {
                 tool.args_schema()
             ));
         }
-
         desc
+    }
+
+    /// Build a registry containing description-only stubs for ALL Sage tools.
+    /// This is the single source of truth for the tool list. Use this when you
+    /// need tool descriptions without live backends (e.g. GEPA evaluation).
+    #[allow(dead_code)]
+    pub fn all_tools_description_only() -> Self {
+        let mut registry = Self::new();
+
+        // -- Memory tools (from memory::tools) --
+        registry.register_descriptor(
+            "memory_replace",
+            "Replace text in a memory block. Requires exact match of old text.",
+            r#"{"block": "block label (e.g., 'persona', 'human')", "old": "exact text to find", "new": "replacement text"}"#,
+        );
+        registry.register_descriptor(
+            "memory_append",
+            "Append text to the end of a memory block.",
+            r#"{"block": "block label (e.g., 'persona', 'human')", "content": "text to append"}"#,
+        );
+        registry.register_descriptor(
+            "memory_insert",
+            "Insert text at a specific line in a memory block. Use line=-1 for end.",
+            r#"{"block": "block label", "content": "text to insert", "line": "line number (0-indexed, -1 for end)"}"#,
+        );
+        registry.register_descriptor(
+            "conversation_search",
+            "Search through past conversation history, including older summarized conversations. Returns matching messages and summaries with relevance scores.",
+            r#"{"query": "search query", "limit": "max results (default 5)"}"#,
+        );
+        registry.register_descriptor(
+            "archival_insert",
+            "Store information in long-term archival memory for future recall. Good for important facts, preferences, and details you want to remember.",
+            r#"{"content": "text to store", "tags": "optional comma-separated tags"}"#,
+        );
+        registry.register_descriptor(
+            "archival_search",
+            "Search long-term archival memory using semantic similarity. Returns most relevant stored memories.",
+            r#"{"query": "search query", "top_k": "max results (default 5)", "tags": "optional comma-separated tags to filter by"}"#,
+        );
+        registry.register_descriptor(
+            "set_preference",
+            "Set a user preference. Known keys: 'timezone' (IANA format like 'America/Chicago'), 'language' (ISO code like 'en'), 'display_name'. Other keys are also allowed.",
+            r#"{"key": "preference key (e.g., 'timezone', 'language', 'display_name')", "value": "preference value"}"#,
+        );
+
+        // -- Scheduler tools (from scheduler_tools) --
+        registry.register_descriptor(
+            "schedule_task",
+            "Schedule a future message or tool execution. Supports one-off (ISO datetime) or recurring (cron expression).",
+            r#"{"task_type": "message|tool_call", "description": "human-readable description", "run_at": "ISO datetime (2026-01-26T15:30:00Z) or cron (0 9 * * MON-FRI)", "payload": "JSON: {\"message\": \"...\"} for message, {\"tool\": \"name\", \"args\": {...}} for tool_call", "timezone": "optional IANA timezone for cron (default: user preference or UTC)"}"#,
+        );
+        registry.register_descriptor(
+            "list_schedules",
+            "List scheduled tasks. By default shows pending tasks only.",
+            r#"{"status": "optional filter: pending, completed, failed, cancelled, or all (default: pending)"}"#,
+        );
+        registry.register_descriptor(
+            "cancel_schedule",
+            "Cancel a pending scheduled task by ID.",
+            r#"{"id": "UUID of the task to cancel"}"#,
+        );
+
+        // -- Shell tool --
+        registry.register_descriptor(
+            "shell",
+            "Execute a shell command in the workspace. Has access to CLI tools: git, curl, jq, grep, sed, awk, python3, node, etc. Use for file operations, running scripts, or system commands.",
+            r#"{"command": "shell command to execute (supports pipes, redirects)", "timeout": "optional timeout in seconds (default 60, max 300)"}"#,
+        );
+
+        // -- Web search tool --
+        registry.register_descriptor(
+            "web_search",
+            "Search the web with AI summaries, real-time data (weather, stocks, sports), and rich results. Use 'freshness' for time-sensitive queries, 'location' for local results.",
+            r#"{ "query": "search query", "count": "results (default 10)", "freshness": "pd=24h, pw=week, pm=month (optional)", "location": "city or 'city, state' for local results (optional)" }"#,
+        );
+
+        // -- Done tool --
+        registry.register_descriptor(
+            "done",
+            "No-op signal. Use ONLY when messages is [] AND no other tools needed. Indicates nothing to do this turn.",
+            r#"{}"#,
+        );
+
+        registry
+    }
+
+    #[allow(dead_code)]
+    fn register_descriptor(&mut self, name: &str, description: &str, args_schema: &str) {
+        self.register(Arc::new(ToolDescriptor {
+            name: name.to_string(),
+            description: description.to_string(),
+            args_schema: args_schema.to_string(),
+        }));
     }
 }
 

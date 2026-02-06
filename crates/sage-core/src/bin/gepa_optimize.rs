@@ -9,9 +9,7 @@
 
 use anyhow::Result;
 use dspy_rs::{configure, ChatAdapter, FeedbackMetric, Predict, Signature, LM};
-use sage_core::{
-    canonical_tool_descriptions, AgentResponse, AgentResponseInput, AGENT_INSTRUCTION,
-};
+use sage_core::{AgentResponse, AgentResponseInput, ToolRegistry, AGENT_INSTRUCTION};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -222,7 +220,7 @@ async fn run_evaluation_async() -> Result<()> {
             memory_metadata: example.memory_metadata.clone(),
             previous_context_summary: example.previous_context_summary.clone(),
             recent_conversation: example.recent_conversation.clone(),
-            available_tools: canonical_tool_descriptions(),
+            available_tools: ToolRegistry::all_tools_description_only().generate_description(),
             is_first_time_user: example.is_first_time_user,
         };
 
@@ -606,7 +604,7 @@ async fn evaluate_instruction(
             memory_metadata: example.memory_metadata.clone(),
             previous_context_summary: example.previous_context_summary.clone(),
             recent_conversation: example.recent_conversation.clone(),
-            available_tools: canonical_tool_descriptions(),
+            available_tools: ToolRegistry::all_tools_description_only().generate_description(),
             is_first_time_user: example.is_first_time_user,
         };
 
