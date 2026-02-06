@@ -48,6 +48,11 @@ start:
         echo "signal-cli already running"
     fi
     
+    # Ensure signal-cli attachments are readable by sage
+    podman run --rm -v signal-cli-data:/signal-cli-data \
+        docker.io/alpine:latest \
+        sh -c "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"
+    
     # Create workspace directory if it doesn't exist
     mkdir -p ~/.sage/workspace
     
@@ -56,6 +61,7 @@ start:
     echo "Starting Sage..."
     podman run -d --name sage --network host \
         -v ~/.sage/workspace:/workspace:U,z \
+        -v signal-cli-data:/signal-cli-data:ro \
         -e DATABASE_URL=postgres://sage:sage@localhost:5434/sage \
         -e MAPLE_API_URL="$MAPLE_API_URL" \
         -e MAPLE_API_KEY="$MAPLE_API_KEY" \
@@ -96,10 +102,16 @@ restart:
     source .env
     set +a
     
+    # Ensure signal-cli attachments are readable by sage
+    podman run --rm -v signal-cli-data:/signal-cli-data \
+        docker.io/alpine:latest \
+        sh -c "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"
+    
     mkdir -p ~/.sage/workspace
     podman rm -f sage 2>/dev/null || true
     podman run -d --name sage --network host \
         -v ~/.sage/workspace:/workspace:U,z \
+        -v signal-cli-data:/signal-cli-data:ro \
         -e DATABASE_URL=postgres://sage:sage@localhost:5434/sage \
         -e MAPLE_API_URL="$MAPLE_API_URL" \
         -e MAPLE_API_KEY="$MAPLE_API_KEY" \

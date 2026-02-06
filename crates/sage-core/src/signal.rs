@@ -16,12 +16,25 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+/// An attachment received from Signal
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct IncomingAttachment {
+    /// Local file path where signal-cli downloaded the attachment
+    pub file: String,
+    /// MIME content type (e.g., "image/jpeg", "image/png")
+    pub content_type: String,
+    /// File size in bytes (if reported)
+    pub size: Option<u64>,
+}
+
 /// A message received from Signal
 #[derive(Debug, Clone)]
 pub struct IncomingMessage {
     pub source: String,
     pub source_name: Option<String>,
     pub message: String,
+    pub attachments: Vec<IncomingAttachment>,
     #[allow(dead_code)]
     pub timestamp: u64,
 }
@@ -368,14 +381,45 @@ pub fn parse_incoming_message(line: &str) -> Option<IncomingMessage> {
     }
 
     let params = value.get("params")?;
+    // signal-cli sends each message twice over TCP: once as params.envelope (direct)
+    // and once as params.result.envelope (subscription wrapper). Only match the direct
+    // format to avoid processing the same message twice.
     let envelope = params.get("envelope")?;
 
     // Get the message content
     let data_message = envelope.get("dataMessage")?;
-    let message = data_message.get("message")?.as_str()?;
+    let message = data_message
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
-    // Skip empty messages
-    if message.is_empty() {
+    // Parse attachments
+    let attachments = data_message
+        .get("attachments")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| {
+                    let content_type = a.get("contentType")?.as_str()?.to_string();
+                    // signal-cli uses "id" for the attachment filename, not "file"
+                    let file = a
+                        .get("id")
+                        .or_else(|| a.get("file"))
+                        .and_then(|v| v.as_str())?
+                        .to_string();
+                    let size = a.get("size").and_then(|v| v.as_u64());
+                    Some(IncomingAttachment {
+                        file,
+                        content_type,
+                        size,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    // Skip if both message and attachments are empty
+    if message.is_empty() && attachments.is_empty() {
         return None;
     }
 
@@ -398,6 +442,7 @@ pub fn parse_incoming_message(line: &str) -> Option<IncomingMessage> {
         source,
         source_name,
         message: message.to_string(),
+        attachments,
         timestamp,
     })
 }

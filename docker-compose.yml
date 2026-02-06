@@ -62,6 +62,17 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # One-shot init: make signal-cli attachments readable by sage
+  signal-cli-perms:
+    image: docker.io/alpine:latest
+    container_name: sage-signal-cli-perms
+    volumes:
+      - signal-cli-data:/signal-cli-data
+    entrypoint: ["sh", "-c", "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"]
+    depends_on:
+      signal-cli:
+        condition: service_healthy
+
   # Sage V2 - Rust AI agent
   sage:
     build:
@@ -73,10 +84,13 @@ services:
         condition: service_healthy
       signal-cli:
         condition: service_healthy
+      signal-cli-perms:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"  # Health check port
     volumes:
       - ${SAGE_WORKSPACE:-~/.sage/workspace}:/workspace:rw
+      - signal-cli-data:/signal-cli-data:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -92,6 +106,7 @@ services:
       - MAPLE_API_KEY=${MAPLE_API_KEY}
       - MAPLE_MODEL=${MAPLE_MODEL:-kimi-k2-5}
       - MAPLE_EMBEDDING_MODEL=${MAPLE_EMBEDDING_MODEL:-maple/nomic-embed-text}
+      - MAPLE_VISION_MODEL=${MAPLE_VISION_MODEL:-${MAPLE_MODEL:-kimi-k2-5}}
       
       # Signal (TCP mode to signal-cli container)
       - SIGNAL_CLI_HOST=signal-cli

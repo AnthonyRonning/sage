@@ -488,6 +488,7 @@ pub struct MessageRow {
     pub tool_calls: Option<serde_json::Value>,
     pub tool_results: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
+    pub attachment_text: Option<String>,
 }
 
 /// Message search result with similarity score
@@ -518,6 +519,7 @@ impl MessageDb {
         embedding: &[f32],
         tool_calls: Option<&serde_json::Value>,
         tool_results: Option<&serde_json::Value>,
+        attachment_text: Option<&str>,
     ) -> Result<Uuid> {
         let mut conn = self
             .conn
@@ -541,9 +543,13 @@ impl MessageDb {
             .map(|v| v.to_string())
             .unwrap_or_else(|| "null".to_string());
 
+        let attachment_text_str = attachment_text
+            .map(|t| format!("'{}'", t.replace('\'', "''")))
+            .unwrap_or_else(|| "NULL".to_string());
+
         diesel::sql_query(format!(
-            "INSERT INTO messages (id, agent_id, user_id, role, content, embedding, tool_calls, tool_results) \
-             VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
+            "INSERT INTO messages (id, agent_id, user_id, role, content, embedding, tool_calls, tool_results, attachment_text) \
+             VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', {})",
             id,
             agent_id,
             user_id.replace('\'', "''"),
@@ -552,6 +558,7 @@ impl MessageDb {
             embedding_str,
             tool_calls_str.replace('\'', "''"),
             tool_results_str.replace('\'', "''"),
+            attachment_text_str,
         ))
         .execute(&mut *conn)?;
 
@@ -571,7 +578,6 @@ impl MessageDb {
 
         use crate::schema::messages;
 
-        // Need to use Diesel's Queryable for basic fields
         #[derive(Queryable)]
         struct RawMessage {
             id: Uuid,
@@ -583,6 +589,7 @@ impl MessageDb {
             tool_calls: Option<serde_json::Value>,
             tool_results: Option<serde_json::Value>,
             created_at: DateTime<Utc>,
+            attachment_text: Option<String>,
         }
 
         let results: Vec<RawMessage> = messages::table
@@ -598,6 +605,7 @@ impl MessageDb {
                 messages::tool_calls,
                 messages::tool_results,
                 messages::created_at,
+                messages::attachment_text,
             ))
             .load(&mut *conn)?;
 
@@ -613,6 +621,7 @@ impl MessageDb {
                 tool_calls: r.tool_calls,
                 tool_results: r.tool_results,
                 created_at: r.created_at,
+                attachment_text: r.attachment_text,
             })
             .collect())
     }
@@ -694,6 +703,7 @@ impl MessageDb {
             tool_calls: Option<serde_json::Value>,
             tool_results: Option<serde_json::Value>,
             created_at: DateTime<Utc>,
+            attachment_text: Option<String>,
         }
 
         let mut results: Vec<RawMessage> = messages::table
@@ -710,6 +720,7 @@ impl MessageDb {
                 messages::tool_calls,
                 messages::tool_results,
                 messages::created_at,
+                messages::attachment_text,
             ))
             .load(&mut *conn)?;
 
@@ -727,6 +738,7 @@ impl MessageDb {
                 tool_calls: r.tool_calls,
                 tool_results: r.tool_results,
                 created_at: r.created_at,
+                attachment_text: r.attachment_text,
             })
             .collect())
     }
@@ -976,6 +988,7 @@ impl SummaryDb {
             tool_calls: Option<serde_json::Value>,
             tool_results: Option<serde_json::Value>,
             created_at: DateTime<Utc>,
+            attachment_text: Option<String>,
         }
 
         let results: Vec<RawMessage> = messages::table
@@ -993,6 +1006,7 @@ impl SummaryDb {
                 messages::tool_calls,
                 messages::tool_results,
                 messages::created_at,
+                messages::attachment_text,
             ))
             .load(&mut *conn)?;
 
@@ -1008,6 +1022,7 @@ impl SummaryDb {
                 tool_calls: r.tool_calls,
                 tool_results: r.tool_results,
                 created_at: r.created_at,
+                attachment_text: r.attachment_text,
             })
             .collect())
     }

@@ -13,6 +13,7 @@ pub mod shell_tool;
 pub mod signal;
 pub mod storage;
 pub mod tools;
+pub mod vision;
 
 // Re-export key types for convenience
 pub use config::Config;

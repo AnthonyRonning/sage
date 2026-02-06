@@ -22,6 +22,7 @@ pub struct RecallMessage {
     pub content: String,
     pub created_at: DateTime<Utc>,
     pub sequence_id: i64,
+    pub attachment_text: Option<String>,
 }
 
 impl From<MessageRow> for RecallMessage {
@@ -34,6 +35,7 @@ impl From<MessageRow> for RecallMessage {
             content: row.content,
             created_at: row.created_at,
             sequence_id: row.sequence_id,
+            attachment_text: row.attachment_text,
         }
     }
 }
@@ -128,18 +130,29 @@ impl RecallManager {
 
     /// Add a message to recall memory with embedding
     pub async fn add_message(&self, user_id: &str, role: &str, content: &str) -> Result<Uuid> {
-        // Generate embedding for the message
+        self.add_message_with_attachment(user_id, role, content, None)
+            .await
+    }
+
+    /// Add a message to recall memory with embedding and optional attachment description
+    pub async fn add_message_with_attachment(
+        &self,
+        user_id: &str,
+        role: &str,
+        content: &str,
+        attachment_text: Option<&str>,
+    ) -> Result<Uuid> {
         let embedding = self.embedding.embed(content).await?;
 
-        // Store in database with embedding
         let id = self.db.messages().insert_message(
             self.agent_id,
             user_id,
             role,
             content,
             &embedding,
-            None, // tool_calls
-            None, // tool_results
+            None,
+            None,
+            attachment_text,
         )?;
 
         tracing::debug!("Stored message {} with embedding", id);
@@ -149,7 +162,17 @@ impl RecallManager {
     /// Add a message WITHOUT embedding (for fast insertion)
     /// Use update_embedding() later to add the embedding in background
     pub fn add_message_sync(&self, user_id: &str, role: &str, content: &str) -> Result<Uuid> {
-        // Store with zero embedding - will be updated later
+        self.add_message_sync_with_attachment(user_id, role, content, None)
+    }
+
+    /// Add a message WITHOUT embedding, with optional attachment description
+    pub fn add_message_sync_with_attachment(
+        &self,
+        user_id: &str,
+        role: &str,
+        content: &str,
+        attachment_text: Option<&str>,
+    ) -> Result<Uuid> {
         let zero_embedding = vec![0.0f32; super::embedding::EMBEDDING_DIM];
 
         let id = self.db.messages().insert_message(
@@ -160,6 +183,7 @@ impl RecallManager {
             &zero_embedding,
             None,
             None,
+            attachment_text,
         )?;
 
         tracing::debug!("Stored message {} (embedding pending)", id);
@@ -195,6 +219,7 @@ impl RecallManager {
             &embedding,
             tool_calls,
             tool_results,
+            None,
         )?;
 
         Ok(id)

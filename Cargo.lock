@@ -3342,6 +3342,7 @@ dependencies = [
  "async-trait",
  "axum",
  "baml-bridge",
+ "base64",
  "chrono",
  "chrono-tz",
  "cron",

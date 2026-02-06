@@ -124,6 +124,18 @@ impl MemoryManager {
         self.recall.add_message_sync(user_id, role, content)
     }
 
+    /// Store a message with optional image attachment description (fast, synchronous)
+    pub fn store_message_sync_with_attachment(
+        &self,
+        user_id: &str,
+        role: &str,
+        content: &str,
+        attachment_text: Option<&str>,
+    ) -> Result<Uuid> {
+        self.recall
+            .add_message_sync_with_attachment(user_id, role, content, attachment_text)
+    }
+
     /// Update embedding for a message (call in background after store_message_sync)
     pub async fn update_message_embedding(&self, message_id: Uuid, content: &str) -> Result<()> {
         self.recall.update_embedding(message_id, content).await

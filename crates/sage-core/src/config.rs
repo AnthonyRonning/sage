@@ -7,6 +7,7 @@ pub struct Config {
     pub maple_api_key: Option<String>,
     pub maple_model: String,
     pub maple_embedding_model: String,
+    pub maple_vision_model: String,
 
     pub letta_api_url: String,
 
@@ -36,6 +37,9 @@ impl Config {
             maple_model: std::env::var("MAPLE_MODEL").unwrap_or_else(|_| "kimi-k2".to_string()),
             maple_embedding_model: std::env::var("MAPLE_EMBEDDING_MODEL")
                 .unwrap_or_else(|_| "nomic-embed-text".to_string()),
+            maple_vision_model: std::env::var("MAPLE_VISION_MODEL").unwrap_or_else(|_| {
+                std::env::var("MAPLE_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string())
+            }),
 
             letta_api_url: std::env::var("LETTA_API_URL")
                 .unwrap_or_else(|_| "http://localhost:8283".to_string()),

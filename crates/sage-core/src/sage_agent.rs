@@ -555,6 +555,21 @@ impl SageAgent {
         }
     }
 
+    /// Store a message with optional attachment description (fast, synchronous)
+    pub fn store_message_sync_with_attachment(
+        &self,
+        user_id: &str,
+        role: &str,
+        content: &str,
+        attachment_text: Option<&str>,
+    ) -> Result<Uuid> {
+        if let Some(memory) = &self.memory {
+            memory.store_message_sync_with_attachment(user_id, role, content, attachment_text)
+        } else {
+            Err(anyhow::anyhow!("No memory system configured"))
+        }
+    }
+
     /// Update embedding for a message (call in background)
     pub async fn update_message_embedding(&self, message_id: Uuid, content: &str) -> Result<()> {
         if let Some(memory) = &self.memory {
@@ -601,6 +616,24 @@ impl SageAgent {
             memory.store_message(user_id, "tool", &content).await
         } else {
             Err(anyhow::anyhow!("No memory system configured"))
+        }
+    }
+
+    /// Get recent messages formatted for vision context (simple "[role]: content" lines)
+    pub fn get_recent_messages_for_vision(&self, limit: usize) -> Result<String> {
+        if let Some(memory) = &self.memory {
+            let messages = memory.get_recent_messages(limit)?;
+            let formatted: Vec<String> = messages
+                .iter()
+                .filter(|(role, _, _)| role == "user" || role == "assistant")
+                .map(|(role, content, _)| {
+                    let truncated: String = content.chars().take(300).collect();
+                    format!("[{}]: {}", role, truncated)
+                })
+                .collect();
+            Ok(formatted.join("\n"))
+        } else {
+            Ok(String::new())
         }
     }
 
@@ -695,8 +728,20 @@ impl SageAgent {
                         } else {
                             msg.content.clone()
                         };
-                        conversation
-                            .push_str(&format!("[{} @ {}]: {}\n", msg.role, timestamp, content));
+                        // Render attachment_text alongside user messages
+                        let display_content = if let Some(ref att) = msg.attachment_text {
+                            if content.is_empty() {
+                                format!("[Uploaded Image: {}]", att)
+                            } else {
+                                format!("{}\n[Uploaded Image: {}]", content, att)
+                            }
+                        } else {
+                            content
+                        };
+                        conversation.push_str(&format!(
+                            "[{} @ {}]: {}\n",
+                            msg.role, timestamp, display_content
+                        ));
                     }
                 }
             }

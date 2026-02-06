@@ -52,6 +52,7 @@ diesel::table! {
         tool_calls -> Nullable<Jsonb>,
         tool_results -> Nullable<Jsonb>,
         created_at -> Timestamptz,
+        attachment_text -> Nullable<Text>,
     }
 }
 

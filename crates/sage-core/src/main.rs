@@ -17,6 +17,7 @@ mod schema;
 mod shell_tool;
 mod signal;
 mod storage;
+mod vision;
 
 use agent_manager::{AgentManager, ContextType};
 use sage_agent::SageAgent;
@@ -286,10 +287,78 @@ async fn main() -> Result<()> {
 
                 info!("Using agent {} for user {}", agent_id, user_name);
 
+                // Send typing indicator early (image processing can be slow)
+                {
+                    let client = signal_client.lock().await;
+                    let _ = client.send_typing(&msg.source, false);
+                }
+
+                // Check for image attachments and run vision pre-processing
+                let attachment_text = {
+                    let image_attachment = msg.attachments.iter().find(|a| vision::is_supported_image(&a.content_type));
+                    if let Some(attachment) = image_attachment {
+                        // Construct full path to the attachment file inside the container
+                        let attachment_path = format!(
+                            "/signal-cli-data/.local/share/signal-cli/attachments/{}",
+                            attachment.file
+                        );
+                        info!("🖼️ Image attachment detected: {} ({}) at {}", attachment.file, attachment.content_type, attachment_path);
+
+                        // Get recent conversation context for the vision agent (last 6 messages)
+                        let recent_context = {
+                            let agent_guard = agent.lock().await;
+                            match agent_guard.get_recent_messages_for_vision(6) {
+                                Ok(ctx) => ctx,
+                                Err(e) => {
+                                    warn!("Failed to get recent messages for vision context: {}", e);
+                                    String::new()
+                                }
+                            }
+                        };
+
+                        match vision::describe_image(
+                            &config.maple_api_url,
+                            config.maple_api_key.as_deref().unwrap_or(""),
+                            &config.maple_vision_model,
+                            &attachment_path,
+                            &attachment.content_type,
+                            &msg.message,
+                            &recent_context,
+                        ).await {
+                            Ok(description) => {
+                                info!("🖼️ Image described ({} chars)", description.len());
+                                Some(description)
+                            }
+                            Err(e) => {
+                                error!("Failed to describe image: {}", e);
+                                Some("[Image attached but could not be processed]".to_string())
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                };
+
+                // Build the user message content that the agent will see
+                let user_message = if let Some(ref desc) = attachment_text {
+                    if msg.message.is_empty() {
+                        format!("[Uploaded Image: {}]", desc)
+                    } else {
+                        format!("{}\n\n[Uploaded Image: {}]", msg.message, desc)
+                    }
+                } else {
+                    msg.message.clone()
+                };
+
                 // Store incoming message (sync, no embedding) and update embedding in background
                 let user_msg_id = {
                     let agent_guard = agent.lock().await;
-                    match agent_guard.store_message_sync(&msg.source, "user", &msg.message) {
+                    match agent_guard.store_message_sync_with_attachment(
+                        &msg.source,
+                        "user",
+                        &msg.message,
+                        attachment_text.as_deref(),
+                    ) {
                         Ok(msg_id) => {
                             tracing::debug!("Stored user message {}", msg_id);
                             Some(msg_id)
@@ -301,27 +370,20 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                // Update embedding in background
+                // Update embedding in background (embed the full content the agent sees)
                 if let Some(msg_id) = user_msg_id {
                     let agent_clone = agent.clone();
-                    let content = msg.message.clone();
+                    let embed_content = user_message.clone();
                     tokio::spawn(async move {
                         let agent_guard = agent_clone.lock().await;
-                        if let Err(e) = agent_guard.update_message_embedding(msg_id, &content).await {
+                        if let Err(e) = agent_guard.update_message_embedding(msg_id, &embed_content).await {
                             tracing::warn!("Failed to update embedding for user message: {}", e);
                         }
                     });
                 }
 
-                // Send typing indicator
-                {
-                    let client = signal_client.lock().await;
-                    let _ = client.send_typing(&msg.source, false);
-                }
-
                 // Process message with agent
                 let recipient = msg.source.clone();
-                let user_message = msg.message.clone();
 
                 let mut had_error = false;
                 let max_steps = 10;

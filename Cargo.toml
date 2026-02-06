@@ -34,6 +34,9 @@ serde_json = "1"
 # HTTP client
 reqwest = { version = "0.12", features = ["json"] }
 
+# Encoding
+base64 = "0.22"
+
 # Database
 diesel = { version = "2.2", features = ["postgres", "chrono", "uuid", "serde_json"] }
 diesel_migrations = "2.2"
