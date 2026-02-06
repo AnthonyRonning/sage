@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use dspy_rs::{configure, BamlType, ChatAdapter, Predict, LM};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -295,13 +295,13 @@ pub trait Tool: Send + Sync {
 
 /// Registry of available tools
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: BTreeMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: BTreeMap::new(),
         }
     }
 
