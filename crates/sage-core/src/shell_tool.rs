@@ -1,11 +1,14 @@
 //! Shell command execution tool
 //!
 //! Allows Sage to execute arbitrary shell commands within its container.
+//! Commands are run asynchronously with enforced timeouts. On timeout the
+//! entire process group is killed so that child/background processes cannot
+//! outlive the tool invocation and block the agent loop.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::process::Command;
+use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 use crate::sage_agent::{Tool, ToolResult};
@@ -83,7 +86,7 @@ impl Tool for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command in the workspace. Has access to CLI tools: git, curl, jq, grep, sed, awk, python3, node, etc. Use for file operations, running scripts, or system commands."
+        "Execute a shell command in the workspace. Has access to CLI tools: git, curl, jq, grep, sed, awk, python3, node, etc. Use for file operations, running scripts, or system commands. Commands MUST complete within the timeout -- do NOT launch persistent/background daemons (they will be killed when the timeout expires)."
     }
 
     fn args_schema(&self) -> &str {
@@ -95,7 +98,7 @@ impl Tool for ShellTool {
             .get("command")
             .ok_or_else(|| anyhow::anyhow!("'command' argument is required"))?;
 
-        let timeout: u64 = args
+        let timeout_secs: u64 = args
             .get("timeout")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_TIMEOUT)
@@ -103,7 +106,7 @@ impl Tool for ShellTool {
 
         info!(
             "Executing shell command: {} (timeout: {}s)",
-            command, timeout
+            command, timeout_secs
         );
 
         // Check for blocked patterns
@@ -119,16 +122,35 @@ impl Tool for ShellTool {
         // Ensure workspace exists
         std::fs::create_dir_all(&self.workspace).ok();
 
-        // Execute command via bash
-        let result = Command::new("bash")
+        // Spawn command in a new process group so we can kill the entire tree
+        // (including any child/background processes) on timeout.
+        let child = match Command::new("bash")
             .args(["-c", command])
             .current_dir(&self.workspace)
             .env("HOME", &self.workspace)
             .env("PWD", &self.workspace)
-            .output();
+            .process_group(0)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(e) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Failed to execute command: {}", e)),
+                });
+            }
+        };
 
-        match result {
-            Ok(output) => {
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+        // Grab the PID now -- wait_with_output() consumes the child.
+        let child_pid = child.id();
+
+        match tokio::time::timeout(timeout_duration, child.wait_with_output()).await {
+            Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let exit_code = output.status.code().unwrap_or(-1);
@@ -159,11 +181,37 @@ impl Tool for ShellTool {
                     },
                 })
             }
-            Err(e) => Ok(ToolResult {
+            Ok(Err(e)) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!("Failed to execute command: {}", e)),
+                error: Some(format!("Failed to read command output: {}", e)),
             }),
+            Err(_) => {
+                // Timeout -- kill the entire process group
+                warn!(
+                    "Shell command timed out after {}s, killing process group: {}",
+                    timeout_secs, command
+                );
+
+                if let Some(pid) = child_pid {
+                    let pgid = pid as i32;
+                    // SIGKILL the entire process group (negative pid)
+                    unsafe {
+                        libc::kill(-pgid, libc::SIGKILL);
+                    }
+                }
+
+                Ok(ToolResult {
+                    success: false,
+                    output: format!(
+                        "Command timed out after {} seconds and was killed (including all child processes). \
+                         Do NOT launch persistent daemons or background services via this tool -- \
+                         they will always be killed at timeout.",
+                        timeout_secs
+                    ),
+                    error: Some(format!("Command timed out after {}s", timeout_secs)),
+                })
+            }
         }
     }
 }
