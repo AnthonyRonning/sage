@@ -45,6 +45,7 @@ cron.workspace = true
 uuid.workspace = true
 dotenvy.workspace = true
 socket2 = "0.5"
+libc = "0.2"
 
 [dev-dependencies]
 tokio-test.workspace = true
