@@ -4,10 +4,14 @@
 //! Commands are run asynchronously with enforced timeouts. On timeout the
 //! entire process group is killed so that child/background processes cannot
 //! outlive the tool invocation and block the agent loop.
+//!
+//! When a command is killed due to timeout, any partial stdout/stderr captured
+//! before the kill is included in the result so the agent can see what happened.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
@@ -35,8 +39,8 @@ const MAX_OUTPUT_SIZE: usize = 100_000; // 100KB
 /// Default timeout in seconds
 const DEFAULT_TIMEOUT: u64 = 60;
 
-/// Maximum timeout in seconds  
-const MAX_TIMEOUT: u64 = 300;
+/// Maximum timeout in seconds (safety rail for clearly nonsensical values)
+const MAX_TIMEOUT: u64 = 86_400; // 24 hours
 
 /// Shell command execution tool
 pub struct ShellTool {
@@ -57,6 +61,49 @@ impl ShellTool {
             .iter()
             .find(|&pattern| lower.contains(pattern))
             .copied()
+    }
+
+    /// Read all available bytes from an optional pipe handle.
+    /// Returns the content as a String (lossy UTF-8).
+    async fn drain_pipe(pipe: &mut Option<tokio::process::ChildStdout>) -> String {
+        // This generic approach won't work for ChildStderr directly, so we
+        // have a separate overload below. Rust doesn't support trait-object
+        // generics ergonomically here, so we just duplicate for the two types.
+        if let Some(ref mut handle) = pipe {
+            let mut buf = Vec::new();
+            let _ = handle.read_to_end(&mut buf).await;
+            String::from_utf8_lossy(&buf).into_owned()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Read all available bytes from an optional stderr pipe handle.
+    async fn drain_stderr(pipe: &mut Option<tokio::process::ChildStderr>) -> String {
+        if let Some(ref mut handle) = pipe {
+            let mut buf = Vec::new();
+            let _ = handle.read_to_end(&mut buf).await;
+            String::from_utf8_lossy(&buf).into_owned()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Build the standard output string from stdout, stderr, and exit code.
+    fn format_output(&self, stdout: &str, stderr: &str, exit_code: i32) -> String {
+        let mut result_parts = Vec::new();
+
+        if !stdout.is_empty() {
+            result_parts.push(format!("STDOUT:\n{}", stdout.trim()));
+        }
+
+        if !stderr.is_empty() {
+            result_parts.push(format!("STDERR:\n{}", stderr.trim()));
+        }
+
+        result_parts.push(format!("EXIT CODE: {}", exit_code));
+
+        self.truncate_output(result_parts.join("\n\n"))
     }
 
     /// Truncate output if too long (handles UTF-8 boundaries safely)
@@ -86,11 +133,11 @@ impl Tool for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command in the workspace. Has access to CLI tools: git, curl, jq, grep, sed, awk, python3, node, etc. Use for file operations, running scripts, or system commands. Commands MUST complete within the timeout -- do NOT launch persistent/background daemons (they will be killed when the timeout expires)."
+        "Execute a shell command in the workspace. Has access to CLI tools: git, curl, jq, grep, sed, awk, python3, node, etc. Use for file operations, running scripts, or system commands. Set the timeout parameter appropriately for each command (default 60s). If the command exceeds the timeout it will be killed and any partial output returned."
     }
 
     fn args_schema(&self) -> &str {
-        r#"{"command": "shell command to execute (supports pipes, redirects)", "timeout": "optional timeout in seconds (default 60, max 300)"}"#
+        r#"{"command": "shell command to execute (supports pipes, redirects)", "timeout": "optional timeout in seconds (default 60, set appropriately for long-running commands)"}"#
     }
 
     async fn execute(&self, args: &HashMap<String, String>) -> Result<ToolResult> {
@@ -124,7 +171,7 @@ impl Tool for ShellTool {
 
         // Spawn command in a new process group so we can kill the entire tree
         // (including any child/background processes) on timeout.
-        let child = match Command::new("bash")
+        let mut child = match Command::new("bash")
             .args(["-c", command])
             .current_dir(&self.workspace)
             .env("HOME", &self.workspace)
@@ -146,35 +193,30 @@ impl Tool for ShellTool {
 
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
-        // Grab the PID now -- wait_with_output() consumes the child.
+        // Take ownership of the pipe handles so we can read partial output on
+        // timeout. child.wait() only waits for exit -- it does not consume the
+        // pipes, unlike child.wait_with_output().
+        let mut child_stdout = child.stdout.take();
+        let mut child_stderr = child.stderr.take();
+        // Note: child_stdout is Option<ChildStdout>, child_stderr is Option<ChildStderr>.
+        // We use separate drain helpers because they are different types.
         let child_pid = child.id();
 
-        match tokio::time::timeout(timeout_duration, child.wait_with_output()).await {
-            Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let exit_code = output.status.code().unwrap_or(-1);
+        match tokio::time::timeout(timeout_duration, child.wait()).await {
+            Ok(Ok(status)) => {
+                // Command finished within the timeout -- drain remaining output.
+                let stdout = Self::drain_pipe(&mut child_stdout).await;
+                let stderr = Self::drain_stderr(&mut child_stderr).await;
+                let exit_code = status.code().unwrap_or(-1);
 
-                let mut result_parts = Vec::new();
-
-                if !stdout.is_empty() {
-                    result_parts.push(format!("STDOUT:\n{}", stdout.trim()));
-                }
-
-                if !stderr.is_empty() {
-                    result_parts.push(format!("STDERR:\n{}", stderr.trim()));
-                }
-
-                result_parts.push(format!("EXIT CODE: {}", exit_code));
-
-                let output_str = self.truncate_output(result_parts.join("\n\n"));
+                let output_str = self.format_output(&stdout, &stderr, exit_code);
 
                 debug!("Shell command completed with exit code {}", exit_code);
 
                 Ok(ToolResult {
-                    success: output.status.success(),
+                    success: status.success(),
                     output: output_str,
-                    error: if output.status.success() {
+                    error: if status.success() {
                         None
                     } else {
                         Some(format!("Command exited with code {}", exit_code))
@@ -184,10 +226,11 @@ impl Tool for ShellTool {
             Ok(Err(e)) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!("Failed to read command output: {}", e)),
+                error: Some(format!("Failed to wait on command: {}", e)),
             }),
             Err(_) => {
-                // Timeout -- kill the entire process group
+                // Timeout -- kill the entire process group first, then drain
+                // whatever partial output was written before the kill.
                 warn!(
                     "Shell command timed out after {}s, killing process group: {}",
                     timeout_secs, command
@@ -201,14 +244,32 @@ impl Tool for ShellTool {
                     }
                 }
 
+                // Reap the zombie so we don't leak it.
+                let _ = child.wait().await;
+
+                // Drain whatever was buffered in the pipes before the kill.
+                let stdout = Self::drain_pipe(&mut child_stdout).await;
+                let stderr = Self::drain_stderr(&mut child_stderr).await;
+
+                let mut result_parts = Vec::new();
+
+                if !stdout.is_empty() {
+                    result_parts.push(format!("STDOUT (partial):\n{}", stdout.trim()));
+                }
+                if !stderr.is_empty() {
+                    result_parts.push(format!("STDERR (partial):\n{}", stderr.trim()));
+                }
+
+                result_parts.push(format!(
+                    "[Command timed out after {}s and was killed]",
+                    timeout_secs
+                ));
+
+                let output_str = self.truncate_output(result_parts.join("\n\n"));
+
                 Ok(ToolResult {
                     success: false,
-                    output: format!(
-                        "Command timed out after {} seconds and was killed (including all child processes). \
-                         Do NOT launch persistent daemons or background services via this tool -- \
-                         they will always be killed at timeout.",
-                        timeout_secs
-                    ),
+                    output: output_str,
                     error: Some(format!("Command timed out after {}s", timeout_secs)),
                 })
             }
