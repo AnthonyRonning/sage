@@ -3350,6 +3350,7 @@ dependencies = [
  "diesel_migrations",
  "dotenvy",
  "dspy-rs",
+ "libc",
  "pgvector",
  "redis",
  "reqwest",
