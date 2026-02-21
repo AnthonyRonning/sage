@@ -171,10 +171,13 @@ pub fn spawn_marmot(
 
     cmd.arg("--state-dir").arg(&config.state_dir);
 
-    for pk in &config.allowed_pubkeys {
-        let hex_pk = normalize_pubkey(pk)
-            .with_context(|| format!("invalid MARMOT_ALLOWED_PUBKEYS entry: {}", pk))?;
-        cmd.arg("--allow-pubkey").arg(&hex_pk);
+    let is_wildcard = config.allowed_pubkeys.iter().any(|p| p == "*");
+    if !is_wildcard {
+        for pk in &config.allowed_pubkeys {
+            let hex_pk = normalize_pubkey(pk)
+                .with_context(|| format!("invalid MARMOT_ALLOWED_PUBKEYS entry: {}", pk))?;
+            cmd.arg("--allow-pubkey").arg(&hex_pk);
+        }
     }
 
     cmd.stdin(Stdio::piped())
