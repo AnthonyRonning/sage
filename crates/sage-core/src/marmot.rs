@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -74,6 +75,13 @@ pub struct MarmotConfig {
 pub struct MarmotClient {
     writer: Arc<Mutex<BufWriter<std::process::ChildStdin>>>,
     request_id: AtomicU64,
+    /// Maps sender pubkey -> latest nostr_group_id for routing replies.
+    /// Currently treats each pubkey as a single identity (like Signal UUID),
+    /// collapsing all groups from the same sender into one agent context.
+    /// TODO: When multi-agent/subagent support lands, this could be extended
+    /// to route per-group (each group ID = separate agent thread) while still
+    /// sharing a parent identity for cross-thread memory.
+    group_routes: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl MarmotClient {
@@ -93,10 +101,23 @@ impl MarmotClient {
     }
 }
 
+impl MarmotClient {
+    fn resolve_group(&self, pubkey: &str) -> Result<String> {
+        let routes = self
+            .group_routes
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        routes
+            .get(pubkey)
+            .cloned()
+            .ok_or_else(|| anyhow!("No group route for pubkey {}", pubkey))
+    }
+}
+
 impl Messenger for MarmotClient {
     fn send_message(&self, recipient: &str, message: &str) -> Result<()> {
+        let group_id = self.resolve_group(recipient)?;
         let id = self.next_request_id();
-        // Find valid UTF-8 boundary for preview
         let preview_end = {
             let max_len = 50.min(message.len());
             let mut end = max_len;
@@ -106,15 +127,16 @@ impl Messenger for MarmotClient {
             end
         };
         info!(
-            "Sending marmot message (req #{}) to group {}: {}...",
+            "Sending marmot message (req #{}) to {} via group {}: {}...",
             id,
             recipient,
+            group_id,
             &message[..preview_end]
         );
         self.send_cmd(json!({
             "cmd": "send_message",
             "request_id": id,
-            "nostr_group_id": recipient,
+            "nostr_group_id": group_id,
             "content": message
         }))
     }
@@ -123,11 +145,15 @@ impl Messenger for MarmotClient {
         if stop {
             return Ok(());
         }
+        let group_id = match self.resolve_group(recipient) {
+            Ok(gid) => gid,
+            Err(_) => return Ok(()),
+        };
         let id = self.next_request_id();
         self.send_cmd(json!({
             "cmd": "send_typing",
             "request_id": id,
-            "nostr_group_id": recipient
+            "nostr_group_id": group_id
         }))
     }
 }
@@ -184,9 +210,11 @@ pub fn spawn_marmot(
 
     let writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
 
+    let group_routes = Arc::new(Mutex::new(HashMap::new()));
     let client = MarmotClient {
         writer: writer.clone(),
         request_id: AtomicU64::new(1),
+        group_routes,
     };
 
     Ok((client, stdout, child))
@@ -199,6 +227,7 @@ pub async fn run_marmot_receive_loop(
     writer: Arc<Mutex<BufWriter<std::process::ChildStdin>>>,
     tx: mpsc::Sender<IncomingMessage>,
     config: MarmotConfig,
+    group_routes: Arc<Mutex<HashMap<String, String>>>,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut reader = BufReader::new(stdout);
@@ -362,13 +391,23 @@ pub async fn run_marmot_receive_loop(
                                 &content[..preview_end]
                             );
 
+                            // Track pubkey -> latest group for reply routing.
+                            // This means the most recent group a user messages from
+                            // becomes the reply target. When we add multi-agent support,
+                            // each group could maintain its own agent thread instead.
+                            if !from_pubkey.is_empty() && !group_id.is_empty() {
+                                if let Ok(mut routes) = group_routes.lock() {
+                                    routes.insert(from_pubkey.to_string(), group_id.to_string());
+                                }
+                            }
+
                             let msg = IncomingMessage {
                                 source: from_pubkey.to_string(),
                                 source_name: None,
                                 message: content.to_string(),
                                 attachments: vec![],
                                 timestamp: created_at,
-                                reply_to: group_id.to_string(),
+                                reply_to: from_pubkey.to_string(),
                             };
 
                             if tx.blocking_send(msg).is_err() {
@@ -409,6 +448,11 @@ pub async fn run_marmot_receive_loop(
 /// Get the shared writer handle from a MarmotClient (for the receive loop).
 pub fn writer_handle(client: &MarmotClient) -> Arc<Mutex<BufWriter<std::process::ChildStdin>>> {
     client.writer.clone()
+}
+
+/// Get the shared group routes handle from a MarmotClient (for the receive loop).
+pub fn group_routes_handle(client: &MarmotClient) -> Arc<Mutex<HashMap<String, String>>> {
+    client.group_routes.clone()
 }
 
 #[cfg(test)]

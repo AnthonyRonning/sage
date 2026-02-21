@@ -121,11 +121,11 @@ async fn main() -> Result<()> {
     // Create channel for incoming messages
     let (tx, mut rx) = mpsc::channel::<IncomingMessage>(100);
 
-    // Determine context type for agent management
-    let context_type = match config.messenger_type {
-        MessengerType::Signal => ContextType::Direct,
-        MessengerType::Marmot => ContextType::Group,
-    };
+    // Agent keyed by identity (Signal UUID or Marmot pubkey).
+    // Both messengers currently use Direct (1:1 identity = 1 agent).
+    // TODO: With multi-agent support, Marmot groups could each get their own
+    // agent thread while sharing a parent identity for cross-thread memory.
+    let context_type = ContextType::Direct;
 
     // Start messenger based on config
     let (messenger, receive_handle): (Arc<Mutex<dyn Messenger>>, _) = match config.messenger_type {
@@ -207,10 +207,12 @@ async fn main() -> Result<()> {
 
             let (client, stdout, _child) = marmot::spawn_marmot(&marmot_config)?;
             let writer = marmot::writer_handle(&client);
+            let group_routes = marmot::group_routes_handle(&client);
             let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(client));
 
             let receive_handle = tokio::spawn(async move {
-                marmot::run_marmot_receive_loop(stdout, writer, tx, marmot_config).await
+                marmot::run_marmot_receive_loop(stdout, writer, tx, marmot_config, group_routes)
+                    .await
             });
 
             (messenger, receive_handle)
