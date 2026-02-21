@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 mod agent_manager;
 mod config;
+mod marmot;
 mod memory;
+mod messenger;
 mod sage_agent;
 mod scheduler;
 mod scheduler_tools;
@@ -20,8 +22,10 @@ mod storage;
 mod vision;
 
 use agent_manager::{AgentManager, ContextType};
+use config::MessengerType;
+use messenger::{IncomingMessage, Messenger};
 use sage_agent::SageAgent;
-use signal::{run_receive_loop, run_receive_loop_tcp, IncomingMessage, SignalClient};
+use signal::{run_receive_loop, run_receive_loop_tcp, SignalClient};
 
 /// Health check response
 #[derive(Serialize)]
@@ -114,82 +118,119 @@ async fn main() -> Result<()> {
         config.workspace_path
     );
 
-    // Check if Signal is configured
-    let signal_phone = match &config.signal_phone_number {
-        Some(phone) => phone.clone(),
-        None => {
-            warn!("SIGNAL_PHONE_NUMBER not set - cannot start Signal interface");
-            info!("Set SIGNAL_PHONE_NUMBER in .env to enable messaging.");
-            tokio::signal::ctrl_c().await?;
-            return Ok(());
-        }
-    };
-
     // Create channel for incoming messages
     let (tx, mut rx) = mpsc::channel::<IncomingMessage>(100);
 
-    // Start Signal client
-    let (signal_client, receive_handle) = if let Some(ref host) = config.signal_cli_host {
-        info!(
-            "Starting Signal interface (TCP mode: {}:{})...",
-            host, config.signal_cli_port
-        );
+    // Determine context type for agent management
+    let context_type = match config.messenger_type {
+        MessengerType::Signal => ContextType::Direct,
+        MessengerType::Marmot => ContextType::Group,
+    };
 
-        let signal_client = SignalClient::connect_tcp(&signal_phone, host, config.signal_cli_port)?;
-        let signal_client = Arc::new(Mutex::new(signal_client));
-
-        let host = host.clone();
-        let port = config.signal_cli_port;
-        let account = signal_phone.clone();
-        // Supervise the receive loop: if the TCP subscription drops, reconnect + resubscribe.
-        let receive_handle = tokio::spawn(async move {
-            let mut backoff = std::time::Duration::from_millis(250);
-            let backoff_max = std::time::Duration::from_secs(60);
-
-            loop {
-                match run_receive_loop_tcp(&host, port, &account, tx.clone()).await {
-                    Ok(()) => {
-                        warn!(
-                            "Signal TCP receive loop exited unexpectedly; restarting in {:?}",
-                            backoff
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Signal TCP receive loop error; restarting in {:?}: {}",
-                            backoff, e
-                        );
-                    }
+    // Start messenger based on config
+    let (messenger, receive_handle): (Arc<Mutex<dyn Messenger>>, _) = match config.messenger_type {
+        MessengerType::Signal => {
+            let signal_phone = match &config.signal_phone_number {
+                Some(phone) => phone.clone(),
+                None => {
+                    warn!("SIGNAL_PHONE_NUMBER not set - cannot start Signal interface");
+                    info!("Set SIGNAL_PHONE_NUMBER in .env to enable messaging.");
+                    tokio::signal::ctrl_c().await?;
+                    return Ok(());
                 }
+            };
 
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(backoff_max);
+            if let Some(ref host) = config.signal_cli_host {
+                info!(
+                    "Starting Signal interface (TCP mode: {}:{})...",
+                    host, config.signal_cli_port
+                );
+
+                let signal_client =
+                    SignalClient::connect_tcp(&signal_phone, host, config.signal_cli_port)?;
+                let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(signal_client));
+
+                let host = host.clone();
+                let port = config.signal_cli_port;
+                let account = signal_phone.clone();
+                let receive_handle = tokio::spawn(async move {
+                    let mut backoff = std::time::Duration::from_millis(250);
+                    let backoff_max = std::time::Duration::from_secs(60);
+
+                    loop {
+                        match run_receive_loop_tcp(&host, port, &account, tx.clone()).await {
+                            Ok(()) => {
+                                warn!(
+                                    "Signal TCP receive loop exited unexpectedly; restarting in {:?}",
+                                    backoff
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Signal TCP receive loop error; restarting in {:?}: {}",
+                                    backoff, e
+                                );
+                            }
+                        }
+
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(backoff_max);
+                    }
+                });
+
+                (messenger, receive_handle)
+            } else {
+                info!("Starting Signal interface (subprocess mode)...");
+
+                let signal_client = SignalClient::spawn_subprocess(&signal_phone)?;
+                let reader = signal_client.take_reader()?;
+                let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(signal_client));
+
+                let receive_handle =
+                    tokio::spawn(async move { run_receive_loop(reader, tx).await });
+
+                (messenger, receive_handle)
             }
-        });
+        }
+        MessengerType::Marmot => {
+            let marmot_config = config.marmot_config();
 
-        (signal_client, receive_handle)
-    } else {
-        info!("Starting Signal interface (subprocess mode)...");
+            if marmot_config.relays.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "MARMOT_RELAYS must be set when MESSENGER=marmot"
+                ));
+            }
 
-        let signal_client = SignalClient::spawn_subprocess(&signal_phone)?;
-        let reader = signal_client.take_reader()?;
-        let signal_client = Arc::new(Mutex::new(signal_client));
+            info!("Starting Marmot interface...");
+            info!("  Relays: {:?}", marmot_config.relays);
+            info!("  State dir: {}", marmot_config.state_dir);
 
-        let receive_handle = tokio::spawn(async move { run_receive_loop(reader, tx).await });
+            let (client, stdout, _child) = marmot::spawn_marmot(&marmot_config)?;
+            let writer = marmot::writer_handle(&client);
+            let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(client));
 
-        (signal_client, receive_handle)
+            let receive_handle = tokio::spawn(async move {
+                marmot::run_marmot_receive_loop(stdout, writer, tx, marmot_config).await
+            });
+
+            (messenger, receive_handle)
+        }
     };
 
     // Log allowed users configuration
-    if config.signal_allowed_users.iter().any(|u| u == "*") {
+    let allowed_users = config.allowed_users();
+    if allowed_users.iter().any(|u| u == "*") {
         info!("Allowed users: * (all users)");
-    } else if config.signal_allowed_users.is_empty() {
-        warn!("⚠️  No SIGNAL_ALLOWED_USERS configured - Sage will respond to ANYONE!");
+    } else if allowed_users.is_empty() {
+        warn!("No allowed users configured - Sage will respond to ANYONE!");
     } else {
-        info!("Allowed users: {:?}", config.signal_allowed_users);
+        info!("Allowed users: {:?}", allowed_users);
     }
 
-    info!("🌿 Sage is awake and listening on Signal!");
+    info!(
+        "Sage is awake and listening via {:?}!",
+        config.messenger_type
+    );
 
     // Start HTTP health check server
     let health_port: u16 = std::env::var("HEALTH_PORT")
@@ -209,48 +250,43 @@ async fn main() -> Result<()> {
     let mut scheduler_rx = scheduler::spawn_scheduler(scheduler_db.clone(), 30);
     info!("Background scheduler started (polling every 30s)");
 
-    // Signal health check interval (every 60 minutes)
-    // This refreshes prekeys to prevent silent send failures
-    let mut signal_health_interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
-    signal_health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    // Skip the first immediate tick
-    signal_health_interval.tick().await;
-    info!("Signal health check scheduled (every 60 minutes)");
+    // Messenger health check interval (every 60 minutes)
+    let mut health_interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+    health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    health_interval.tick().await;
+    info!("Messenger health check scheduled (every 60 minutes)");
 
     // Main event loop
     loop {
         tokio::select! {
-            // Periodic Signal health check (refresh prekeys)
-            _ = signal_health_interval.tick() => {
-                info!("🔄 Running Signal health check...");
-                let client = signal_client.lock().await;
-                if let Err(e) = client.refresh_account() {
-                    warn!("Signal health check failed: {} - will retry next interval", e);
+            // Periodic messenger health check
+            _ = health_interval.tick() => {
+                let client = messenger.lock().await;
+                if let Err(e) = client.refresh() {
+                    warn!("Messenger health check failed: {} - will retry next interval", e);
                 }
             }
             // Handle scheduled task events
             Some(event) = scheduler_rx.recv() => {
                 let task = event.task;
-                info!("⏰ Processing scheduled task: {} ({})", task.description, task.task_type.as_str());
+                info!("Processing scheduled task: {} ({})", task.description, task.task_type.as_str());
 
-                // Look up the signal_identifier for this agent_id
                 let signal_identifier = match agent_manager.get_signal_identifier(task.agent_id) {
                     Ok(Some(id)) => id,
                     Ok(None) => {
-                        error!("No signal_identifier found for agent_id {} - cannot deliver scheduled task", task.agent_id);
+                        error!("No identifier found for agent_id {} - cannot deliver scheduled task", task.agent_id);
                         continue;
                     }
                     Err(e) => {
-                        error!("Failed to look up signal_identifier for agent_id {}: {}", task.agent_id, e);
+                        error!("Failed to look up identifier for agent_id {}: {}", task.agent_id, e);
                         continue;
                     }
                 };
 
-                // Handle different task types based on payload
                 let task_result: Result<(), String> = match &task.payload {
                     scheduler::TaskPayload::Message(msg_payload) => {
-                        info!("📤 Sending scheduled message to {}: {}", signal_identifier, msg_payload.message);
-                        let client = signal_client.lock().await;
+                        info!("Sending scheduled message to {}: {}", signal_identifier, msg_payload.message);
+                        let client = messenger.lock().await;
                         if let Err(e) = client.send_message(&signal_identifier, &msg_payload.message) {
                             Err(format!("Failed to send scheduled message: {}", e))
                         } else {
@@ -262,7 +298,6 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                // Update task status based on result
                 match task_result {
                     Ok(()) => {
                         if let Err(e) = scheduler::complete_task(&scheduler_db, &task) {
@@ -281,47 +316,47 @@ async fn main() -> Result<()> {
             // Handle incoming messages
             Some(msg) = rx.recv() => {
                 // Check if sender is allowed
-                if !is_user_allowed(&msg.source, &config.signal_allowed_users) {
-                    warn!("🚫 Ignoring message from unauthorized user: {}", msg.source);
+                if !is_user_allowed(&msg.source, config.allowed_users()) {
+                    warn!("Ignoring message from unauthorized user: {}", msg.source);
                     continue;
                 }
 
                 let user_name = msg.source_name.as_deref().unwrap_or(&msg.source);
                 info!("Processing message from {}...", user_name);
 
-                // Get or create agent for this user
+                // Get or create agent for this conversation
+                // For Signal: keyed by user UUID (reply_to == source)
+                // For Marmot: keyed by group ID (reply_to == nostr_group_id)
                 let (agent_id, agent) = match agent_manager.get_or_create_agent(
-                    &msg.source,
-                    ContextType::Direct,
+                    &msg.reply_to,
+                    context_type,
                     msg.source_name.as_deref(),
                 ).await {
                     Ok(result) => result,
                     Err(e) => {
-                        error!("Failed to get/create agent for {}: {}", msg.source, e);
+                        error!("Failed to get/create agent for {}: {}", msg.reply_to, e);
                         continue;
                     }
                 };
 
                 info!("Using agent {} for user {}", agent_id, user_name);
 
-                // Send typing indicator early (image processing can be slow)
+                // Send typing indicator early
                 {
-                    let client = signal_client.lock().await;
-                    let _ = client.send_typing(&msg.source, false);
+                    let client = messenger.lock().await;
+                    let _ = client.send_typing(&msg.reply_to, false);
                 }
 
                 // Check for image attachments and run vision pre-processing
                 let attachment_text = {
                     let image_attachment = msg.attachments.iter().find(|a| vision::is_supported_image(&a.content_type));
                     if let Some(attachment) = image_attachment {
-                        // Construct full path to the attachment file inside the container
                         let attachment_path = format!(
                             "/signal-cli-data/.local/share/signal-cli/attachments/{}",
                             attachment.file
                         );
-                        info!("🖼️ Image attachment detected: {} ({}) at {}", attachment.file, attachment.content_type, attachment_path);
+                        info!("Image attachment detected: {} ({}) at {}", attachment.file, attachment.content_type, attachment_path);
 
-                        // Get recent conversation context for the vision agent (last 6 messages)
                         let recent_context = {
                             let agent_guard = agent.lock().await;
                             match agent_guard.get_recent_messages_for_vision(6) {
@@ -343,7 +378,7 @@ async fn main() -> Result<()> {
                             &recent_context,
                         ).await {
                             Ok(description) => {
-                                info!("🖼️ Image described ({} chars)", description.len());
+                                info!("Image described ({} chars)", description.len());
                                 Some(description)
                             }
                             Err(e) => {
@@ -356,7 +391,6 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                // Build the user message content that the agent will see
                 let user_message = if let Some(ref desc) = attachment_text {
                     if msg.message.is_empty() {
                         format!("[Uploaded Image: {}]", desc)
@@ -367,7 +401,7 @@ async fn main() -> Result<()> {
                     msg.message.clone()
                 };
 
-                // Store incoming message (sync, no embedding) and update embedding in background
+                // Store incoming message
                 let user_msg_id = {
                     let agent_guard = agent.lock().await;
                     match agent_guard.store_message_sync_with_attachment(
@@ -387,7 +421,6 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                // Update embedding in background (embed the full content the agent sees)
                 if let Some(msg_id) = user_msg_id {
                     let agent_clone = agent.clone();
                     let embed_content = user_message.clone();
@@ -400,7 +433,7 @@ async fn main() -> Result<()> {
                 }
 
                 // Process message with agent
-                let recipient = msg.source.clone();
+                let recipient = msg.reply_to.clone();
 
                 let mut had_error = false;
                 let max_steps = 10;
@@ -413,44 +446,37 @@ async fn main() -> Result<()> {
 
                     match step_result {
                         Ok(result) => {
-                            // Send messages from this step IMMEDIATELY (don't wait for storage)
                             let msg_count = result.messages.len();
                             let mut messages_to_store: Vec<String> = Vec::new();
 
                             for (i, response) in result.messages.iter().enumerate() {
                                 let log_preview: String = response.chars().take(50).collect();
-                                info!("📤 Sending response ({}/{}): {}...", i + 1, msg_count, log_preview);
+                                info!("Sending response ({}/{}): {}...", i + 1, msg_count, log_preview);
 
-                                // Send reply FIRST (don't block on storage)
                                 {
-                                    let client = signal_client.lock().await;
+                                    let client = messenger.lock().await;
                                     if let Err(e) = client.send_message(&recipient, response) {
                                         error!("Failed to send reply: {}", e);
                                     }
                                 }
 
-                                // Queue for background storage
                                 messages_to_store.push(response.clone());
 
-                                // Delay between multiple messages for natural feel
                                 if i < msg_count - 1 {
                                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                                     {
-                                        let client = signal_client.lock().await;
+                                        let client = messenger.lock().await;
                                         let _ = client.send_typing(&recipient, false);
                                     }
                                     tokio::time::sleep(tokio::time::Duration::from_millis(1450)).await;
                                 }
                             }
 
-                            // Stop typing indicator
                             if msg_count > 0 {
-                                let client = signal_client.lock().await;
+                                let client = messenger.lock().await;
                                 let _ = client.send_typing(&recipient, true);
                             }
 
-                            // Store messages SYNCHRONOUSLY so next step sees them in conversation history
-                            // Only the embedding update is async (slow API call)
                             let mut msg_ids_for_embedding: Vec<(Uuid, String)> = Vec::new();
                             for response in &messages_to_store {
                                 let msg_id = {
@@ -462,7 +488,6 @@ async fn main() -> Result<()> {
                                 }
                             }
 
-                            // Async embedding updates (don't block next step)
                             if !msg_ids_for_embedding.is_empty() {
                                 let agent_clone = agent.clone();
                                 tokio::spawn(async move {
@@ -475,7 +500,6 @@ async fn main() -> Result<()> {
                                 });
                             }
 
-                            // Store executed tool calls in background (still uses async store_tool_message)
                             if !result.executed_tools.is_empty() {
                                 let agent_clone = agent.clone();
                                 let recipient_clone = recipient.clone();
@@ -488,10 +512,9 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                 });
-                                info!("🔧 Queued {} tool calls for storage", result.executed_tools.len());
+                                info!("Queued {} tool calls for storage", result.executed_tools.len());
                             }
 
-                            // If done, break
                             if result.done {
                                 break;
                             }
@@ -505,7 +528,7 @@ async fn main() -> Result<()> {
                 }
 
                 if had_error {
-                    let client = signal_client.lock().await;
+                    let client = messenger.lock().await;
                     let _ = client.send_message(
                         &recipient,
                         "Sorry, I encountered an error processing your message."

@@ -16,28 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-/// An attachment received from Signal
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct IncomingAttachment {
-    /// Local file path where signal-cli downloaded the attachment
-    pub file: String,
-    /// MIME content type (e.g., "image/jpeg", "image/png")
-    pub content_type: String,
-    /// File size in bytes (if reported)
-    pub size: Option<u64>,
-}
-
-/// A message received from Signal
-#[derive(Debug, Clone)]
-pub struct IncomingMessage {
-    pub source: String,
-    pub source_name: Option<String>,
-    pub message: String,
-    pub attachments: Vec<IncomingAttachment>,
-    #[allow(dead_code)]
-    pub timestamp: u64,
-}
+use crate::messenger::{IncomingAttachment, IncomingMessage, Messenger};
 
 /// Connection mode for signal-cli
 #[allow(dead_code)]
@@ -350,6 +329,20 @@ impl SignalClient {
     }
 }
 
+impl Messenger for SignalClient {
+    fn send_message(&self, recipient: &str, message: &str) -> Result<()> {
+        SignalClient::send_message(self, recipient, message)
+    }
+
+    fn send_typing(&self, recipient: &str, stop: bool) -> Result<()> {
+        SignalClient::send_typing(self, recipient, stop)
+    }
+
+    fn refresh(&self) -> Result<()> {
+        self.refresh_account()
+    }
+}
+
 impl Drop for SignalClient {
     fn drop(&mut self) {
         if let Ok(mut mode) = self.mode.lock() {
@@ -439,6 +432,7 @@ pub fn parse_incoming_message(line: &str) -> Option<IncomingMessage> {
     let timestamp = data_message.get("timestamp")?.as_u64()?;
 
     Some(IncomingMessage {
+        reply_to: source.clone(),
         source,
         source_name,
         message: message.to_string(),
