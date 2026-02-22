@@ -64,6 +64,7 @@ pub fn normalize_pubkey(input: &str) -> Result<String> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MarmotConfig {
     pub binary_path: String,
     pub relays: Vec<String>,
@@ -82,7 +83,7 @@ pub struct MarmotClient {
     /// to route per-group (each group ID = separate agent thread) while still
     /// sharing a parent identity for cross-thread memory.
     group_routes: Arc<Mutex<HashMap<String, String>>>,
-    child: Mutex<Child>,
+    child: Arc<Mutex<Child>>,
 }
 
 impl Drop for MarmotClient {
@@ -226,246 +227,355 @@ pub fn spawn_marmot(config: &MarmotConfig) -> Result<(MarmotClient, std::process
         writer: writer.clone(),
         request_id: AtomicU64::new(1),
         group_routes,
-        child: Mutex::new(child),
+        child: Arc::new(Mutex::new(child)),
     };
 
     Ok((client, stdout))
 }
 
-/// Run the marmot receive loop: waits for daemon ready, publishes keypackage,
-/// then listens for incoming messages and auto-accepts welcomes.
+/// Single iteration of the marmot receive loop: spawn marmotd, run through
+/// all three phases (ready, keypackage, message loop), and return on any exit.
+/// The caller (supervisor) handles retry with backoff.
+fn run_marmot_receive_once(
+    config: &MarmotConfig,
+    tx: &mpsc::Sender<IncomingMessage>,
+    group_routes: &Arc<Mutex<HashMap<String, String>>>,
+    client_writer: &Arc<Mutex<BufWriter<std::process::ChildStdin>>>,
+    client_child: &Mutex<Child>,
+) -> Result<()> {
+    // Spawn a fresh marmotd process
+    let mut cmd = Command::new(&config.binary_path);
+    cmd.arg("daemon");
+    for relay in &config.relays {
+        cmd.arg("--relay").arg(relay);
+    }
+    cmd.arg("--state-dir").arg(&config.state_dir);
+    let is_wildcard = config.allowed_pubkeys.iter().any(|p| p == "*");
+    if !is_wildcard {
+        for pk in &config.allowed_pubkeys {
+            if let Ok(hex_pk) = normalize_pubkey(pk) {
+                cmd.arg("--allow-pubkey").arg(&hex_pk);
+            }
+        }
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    info!(
+        "Spawning marmotd: {} daemon --relay {} --state-dir {}",
+        config.binary_path,
+        config.relays.join(","),
+        config.state_dir
+    );
+
+    let mut child = cmd.spawn().context("Failed to spawn marmotd")?;
+    let stdin = child.stdin.take().context("Failed to get marmotd stdin")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("Failed to get marmotd stdout")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("Failed to get marmotd stderr")?;
+
+    // Forward stderr to tracing
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            info!(target: "marmotd", "{}", line);
+        }
+    });
+
+    // Update the shared writer and child so MarmotClient can send to the new process
+    {
+        let mut w = client_writer
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        *w = BufWriter::new(stdin);
+    }
+    {
+        let mut c = client_child
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        // Kill old process if still running
+        let _ = c.kill();
+        let _ = c.wait();
+        *c = child;
+    }
+
+    let send_cmd = |cmd: serde_json::Value| -> Result<()> {
+        let mut w = client_writer
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let s = serde_json::to_string(&cmd)? + "\n";
+        w.write_all(s.as_bytes())?;
+        w.flush()?;
+        Ok(())
+    };
+
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+
+    // Phase 1: Wait for ready
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(anyhow!("marmotd closed stdout before ready"));
+        }
+        let event: serde_json::Value = match serde_json::from_str(line.trim()) {
+            Ok(v) => v,
+            Err(_) => {
+                debug!("marmotd non-json output (startup): {}", line.trim());
+                continue;
+            }
+        };
+
+        if event.get("type").and_then(|t| t.as_str()) == Some("ready") {
+            let pubkey = event
+                .get("pubkey")
+                .and_then(|p| p.as_str())
+                .unwrap_or("unknown");
+            let npub = event
+                .get("npub")
+                .and_then(|n| n.as_str())
+                .unwrap_or("unknown");
+            info!("marmotd ready: pubkey={} npub={}", pubkey, npub);
+            break;
+        }
+    }
+
+    // Phase 2: Publish keypackage
+    let relays: Vec<&str> = config.relays.iter().map(|s| s.as_str()).collect();
+    send_cmd(json!({
+        "cmd": "publish_keypackage",
+        "request_id": "init_kp",
+        "relays": relays
+    }))?;
+
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(anyhow!("marmotd closed stdout during keypackage publish"));
+        }
+        let event: serde_json::Value = match serde_json::from_str(line.trim()) {
+            Ok(v) => v,
+            Err(_) => {
+                debug!("marmotd non-json output (keypackage): {}", line.trim());
+                continue;
+            }
+        };
+
+        let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if event_type == "ok"
+            && event.get("request_id").and_then(|id| id.as_str()) == Some("init_kp")
+        {
+            info!("marmotd keypackage published");
+            break;
+        }
+        if event_type == "error"
+            && event.get("request_id").and_then(|id| id.as_str()) == Some("init_kp")
+        {
+            let msg = event
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown error");
+            warn!("marmotd keypackage publish failed: {}", msg);
+            break;
+        }
+    }
+
+    info!("Marmot receive loop started, listening for messages...");
+
+    // Phase 3: Main receive loop
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                return Err(anyhow!("marmotd closed stdout unexpectedly"));
+            }
+            Ok(_) => {
+                let event: serde_json::Value = match serde_json::from_str(line.trim()) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        debug!("marmotd non-json output: {} ({})", line.trim(), e);
+                        continue;
+                    }
+                };
+                let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                match event_type {
+                    "welcome_received" => {
+                        let wrapper_id = event
+                            .get("wrapper_event_id")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        let from = event
+                            .get("from_pubkey")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("unknown");
+                        let group_name = event
+                            .get("group_name")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        info!(
+                            "Marmot welcome received from {} (group: {}, wrapper: {})",
+                            from, group_name, wrapper_id
+                        );
+
+                        if config.auto_accept_welcomes && !wrapper_id.is_empty() {
+                            let req_id = format!("auto_{}", wrapper_id);
+                            if let Err(e) = send_cmd(json!({
+                                "cmd": "accept_welcome",
+                                "request_id": req_id,
+                                "wrapper_event_id": wrapper_id
+                            })) {
+                                warn!("Failed to auto-accept welcome: {}", e);
+                            }
+                        }
+                    }
+                    "group_joined" => {
+                        let group_id = event
+                            .get("nostr_group_id")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("unknown");
+                        info!("Marmot joined group: {}", group_id);
+                    }
+                    "message_received" => {
+                        let from_pubkey = event
+                            .get("from_pubkey")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        let content = event.get("content").and_then(|x| x.as_str()).unwrap_or("");
+                        let group_id = event
+                            .get("nostr_group_id")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        let created_at = event
+                            .get("created_at")
+                            .and_then(|x| x.as_u64())
+                            .unwrap_or(0);
+
+                        if content.is_empty() {
+                            continue;
+                        }
+
+                        let preview_end = {
+                            let max_len = 100.min(content.len());
+                            let mut end = max_len;
+                            while end > 0 && !content.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            end
+                        };
+                        info!(
+                            "Marmot message from {} in group {}: {}",
+                            from_pubkey,
+                            group_id,
+                            &content[..preview_end]
+                        );
+
+                        // Track pubkey -> latest group for reply routing.
+                        // This means the most recent group a user messages from
+                        // becomes the reply target. When we add multi-agent support,
+                        // each group could maintain its own agent thread instead.
+                        if !from_pubkey.is_empty() && !group_id.is_empty() {
+                            if let Ok(mut routes) = group_routes.lock() {
+                                routes.insert(from_pubkey.to_string(), group_id.to_string());
+                            }
+                        }
+
+                        let msg = IncomingMessage {
+                            source: from_pubkey.to_string(),
+                            source_name: None,
+                            message: content.to_string(),
+                            attachments: vec![],
+                            timestamp: created_at,
+                            reply_to: from_pubkey.to_string(),
+                            reply_context: Some(group_id.to_string()),
+                        };
+
+                        if tx.blocking_send(msg).is_err() {
+                            error!("Failed to send marmot message to channel (receiver dropped)");
+                            return Err(anyhow!("message channel closed"));
+                        }
+                    }
+                    "ok" | "keypackage_published" => {
+                        debug!("marmotd: {}", line.trim());
+                    }
+                    "error" => {
+                        let msg = event
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("unknown");
+                        warn!("marmotd error: {}", msg);
+                    }
+                    _ => {
+                        debug!("marmotd event: {}", line.trim());
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(anyhow!("Error reading from marmotd: {}", e));
+            }
+        }
+    }
+}
+
+/// Supervised marmot receive loop with exponential backoff on failures.
+/// Respawns marmotd and re-initializes stdin/stdout handles on each retry.
 pub async fn run_marmot_receive_loop(
-    stdout: std::process::ChildStdout,
-    writer: Arc<Mutex<BufWriter<std::process::ChildStdin>>>,
     tx: mpsc::Sender<IncomingMessage>,
     config: MarmotConfig,
     group_routes: Arc<Mutex<HashMap<String, String>>>,
+    client_writer: Arc<Mutex<BufWriter<std::process::ChildStdin>>>,
+    client_child: Arc<Mutex<Child>>,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
+    let mut backoff = std::time::Duration::from_millis(250);
+    let backoff_max = std::time::Duration::from_secs(60);
 
-        let send_cmd = |cmd: serde_json::Value| -> Result<()> {
-            let mut w = writer.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
-            let s = serde_json::to_string(&cmd)? + "\n";
-            w.write_all(s.as_bytes())?;
-            w.flush()?;
-            Ok(())
-        };
+    loop {
+        let config = config.clone();
+        let tx = tx.clone();
+        let group_routes = group_routes.clone();
+        let client_writer = client_writer.clone();
+        let client_child = client_child.clone();
 
-        // Phase 1: Wait for ready
-        loop {
-            line.clear();
-            if reader.read_line(&mut line)? == 0 {
-                return Err(anyhow!("marmotd closed stdout before ready"));
+        let result = tokio::task::spawn_blocking(move || {
+            run_marmot_receive_once(&config, &tx, &group_routes, &client_writer, &client_child)
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {
+                warn!(
+                    "Marmot receive loop exited unexpectedly; restarting in {:?}",
+                    backoff
+                );
             }
-            let event: serde_json::Value = match serde_json::from_str(line.trim()) {
-                Ok(v) => v,
-                Err(_) => {
-                    debug!("marmotd non-json output (startup): {}", line.trim());
-                    continue;
+            Ok(Err(e)) => {
+                let msg = format!("{}", e);
+                if msg.contains("message channel closed") {
+                    error!("Message channel closed, stopping marmot supervisor");
+                    return Err(e);
                 }
-            };
-
-            if event.get("type").and_then(|t| t.as_str()) == Some("ready") {
-                let pubkey = event
-                    .get("pubkey")
-                    .and_then(|p| p.as_str())
-                    .unwrap_or("unknown");
-                let npub = event
-                    .get("npub")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("unknown");
-                info!("marmotd ready: pubkey={} npub={}", pubkey, npub);
-                break;
+                warn!(
+                    "Marmot receive loop error; restarting in {:?}: {}",
+                    backoff, e
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Marmot receive task panicked; restarting in {:?}: {}",
+                    backoff, e
+                );
             }
         }
 
-        // Phase 2: Publish keypackage
-        let relays: Vec<&str> = config.relays.iter().map(|s| s.as_str()).collect();
-        send_cmd(json!({
-            "cmd": "publish_keypackage",
-            "request_id": "init_kp",
-            "relays": relays
-        }))?;
-
-        loop {
-            line.clear();
-            if reader.read_line(&mut line)? == 0 {
-                return Err(anyhow!("marmotd closed stdout during keypackage publish"));
-            }
-            let event: serde_json::Value = match serde_json::from_str(line.trim()) {
-                Ok(v) => v,
-                Err(_) => {
-                    debug!("marmotd non-json output (keypackage): {}", line.trim());
-                    continue;
-                }
-            };
-
-            let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            if event_type == "ok"
-                && event.get("request_id").and_then(|id| id.as_str()) == Some("init_kp")
-            {
-                info!("marmotd keypackage published");
-                break;
-            }
-            if event_type == "error"
-                && event.get("request_id").and_then(|id| id.as_str()) == Some("init_kp")
-            {
-                let msg = event
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("unknown error");
-                warn!("marmotd keypackage publish failed: {}", msg);
-                break;
-            }
-        }
-
-        info!("Marmot receive loop started, listening for messages...");
-
-        // Phase 3: Main receive loop
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    warn!("marmotd closed stdout");
-                    break;
-                }
-                Ok(_) => {
-                    let event: serde_json::Value = match serde_json::from_str(line.trim()) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            debug!("marmotd non-json output: {} ({})", line.trim(), e);
-                            continue;
-                        }
-                    };
-                    let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-                    match event_type {
-                        "welcome_received" => {
-                            let wrapper_id = event
-                                .get("wrapper_event_id")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("");
-                            let from = event
-                                .get("from_pubkey")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("unknown");
-                            let group_name = event
-                                .get("group_name")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("");
-                            info!(
-                                "Marmot welcome received from {} (group: {}, wrapper: {})",
-                                from, group_name, wrapper_id
-                            );
-
-                            if config.auto_accept_welcomes && !wrapper_id.is_empty() {
-                                let req_id = format!("auto_{}", wrapper_id);
-                                if let Err(e) = send_cmd(json!({
-                                    "cmd": "accept_welcome",
-                                    "request_id": req_id,
-                                    "wrapper_event_id": wrapper_id
-                                })) {
-                                    warn!("Failed to auto-accept welcome: {}", e);
-                                }
-                            }
-                        }
-                        "group_joined" => {
-                            let group_id = event
-                                .get("nostr_group_id")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("unknown");
-                            info!("Marmot joined group: {}", group_id);
-                        }
-                        "message_received" => {
-                            let from_pubkey = event
-                                .get("from_pubkey")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("");
-                            let content =
-                                event.get("content").and_then(|x| x.as_str()).unwrap_or("");
-                            let group_id = event
-                                .get("nostr_group_id")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("");
-                            let created_at = event
-                                .get("created_at")
-                                .and_then(|x| x.as_u64())
-                                .unwrap_or(0);
-
-                            if content.is_empty() {
-                                continue;
-                            }
-
-                            let preview_end = {
-                                let max_len = 100.min(content.len());
-                                let mut end = max_len;
-                                while end > 0 && !content.is_char_boundary(end) {
-                                    end -= 1;
-                                }
-                                end
-                            };
-                            info!(
-                                "Marmot message from {} in group {}: {}",
-                                from_pubkey,
-                                group_id,
-                                &content[..preview_end]
-                            );
-
-                            // Track pubkey -> latest group for reply routing.
-                            // This means the most recent group a user messages from
-                            // becomes the reply target. When we add multi-agent support,
-                            // each group could maintain its own agent thread instead.
-                            if !from_pubkey.is_empty() && !group_id.is_empty() {
-                                if let Ok(mut routes) = group_routes.lock() {
-                                    routes.insert(from_pubkey.to_string(), group_id.to_string());
-                                }
-                            }
-
-                            let msg = IncomingMessage {
-                                source: from_pubkey.to_string(),
-                                source_name: None,
-                                message: content.to_string(),
-                                attachments: vec![],
-                                timestamp: created_at,
-                                reply_to: from_pubkey.to_string(),
-                                reply_context: Some(group_id.to_string()),
-                            };
-
-                            if tx.blocking_send(msg).is_err() {
-                                error!("Failed to send marmot message to channel");
-                                break;
-                            }
-                        }
-                        "ok" | "keypackage_published" => {
-                            debug!("marmotd: {}", line.trim());
-                        }
-                        "error" => {
-                            let msg = event
-                                .get("message")
-                                .and_then(|m| m.as_str())
-                                .unwrap_or("unknown");
-                            warn!("marmotd error: {}", msg);
-                        }
-                        _ => {
-                            debug!("marmotd event: {}", line.trim());
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Error reading from marmotd: {}", e);
-                    break;
-                }
-            }
-        }
-
-        warn!("Marmot receive loop ended");
-        Ok::<_, anyhow::Error>(())
-    })
-    .await??;
-
-    Ok(())
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(backoff_max);
+    }
 }
 
 /// Get the shared writer handle from a MarmotClient (for the receive loop).
@@ -476,6 +586,11 @@ pub fn writer_handle(client: &MarmotClient) -> Arc<Mutex<BufWriter<std::process:
 /// Get the shared group routes handle from a MarmotClient (for the receive loop).
 pub fn group_routes_handle(client: &MarmotClient) -> Arc<Mutex<HashMap<String, String>>> {
     client.group_routes.clone()
+}
+
+/// Get the shared child process handle from a MarmotClient (for the supervisor loop).
+pub fn child_handle(client: &MarmotClient) -> Arc<Mutex<Child>> {
+    client.child.clone()
 }
 
 #[cfg(test)]

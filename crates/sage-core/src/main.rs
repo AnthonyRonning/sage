@@ -205,9 +205,10 @@ async fn main() -> Result<()> {
             info!("  Relays: {:?}", marmot_config.relays);
             info!("  State dir: {}", marmot_config.state_dir);
 
-            let (client, stdout) = marmot::spawn_marmot(&marmot_config)?;
+            let (client, _initial_stdout) = marmot::spawn_marmot(&marmot_config)?;
             let writer = marmot::writer_handle(&client);
             let group_routes = marmot::group_routes_handle(&client);
+            let child = marmot::child_handle(&client);
 
             // Restore persisted pubkey -> group_id routes from DB
             match agent_manager.load_reply_contexts() {
@@ -226,8 +227,9 @@ async fn main() -> Result<()> {
 
             let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(client));
 
+            // Supervisor loop: respawns marmotd on failure with exponential backoff
             let receive_handle = tokio::spawn(async move {
-                marmot::run_marmot_receive_loop(stdout, writer, tx, marmot_config, group_routes)
+                marmot::run_marmot_receive_loop(tx, marmot_config, group_routes, writer, child)
                     .await
             });
 
