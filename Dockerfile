@@ -42,7 +42,7 @@ RUN cargo build --release
 
 # Stage 4: Build marmotd (optional MLS messaging sidecar)
 FROM chef AS marmotd-builder
-ARG MARMOTD_VERSION=0.3.2
+ARG MARMOTD_VERSION=0.5.1
 RUN git clone --depth 1 --branch marmotd-v${MARMOTD_VERSION} https://github.com/sledtools/pika.git /marmotd-src
 WORKDIR /marmotd-src
 RUN cargo build -p marmotd --release
