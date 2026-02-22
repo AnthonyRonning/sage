@@ -328,7 +328,7 @@ async fn main() -> Result<()> {
 
                 // Get or create agent for this conversation
                 // For Signal: keyed by user UUID (reply_to == source)
-                // For Marmot: keyed by group ID (reply_to == nostr_group_id)
+                // For Marmot: keyed by sender pubkey (reply_to == from_pubkey)
                 let (agent_id, agent) = match agent_manager.get_or_create_agent(
                     &msg.reply_to,
                     context_type,

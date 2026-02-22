@@ -19,7 +19,7 @@ pub struct IncomingMessage {
     pub attachments: Vec<IncomingAttachment>,
     #[allow(dead_code)]
     pub timestamp: u64,
-    /// Where to send replies (same as source for Signal, nostr_group_id for Marmot)
+    /// Identity key for agent lookup and reply routing (Signal UUID or Marmot pubkey)
     pub reply_to: String,
 }
 
