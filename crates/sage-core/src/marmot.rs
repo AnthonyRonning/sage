@@ -259,8 +259,13 @@ pub async fn run_marmot_receive_loop(
             if reader.read_line(&mut line)? == 0 {
                 return Err(anyhow!("marmotd closed stdout before ready"));
             }
-            let event: serde_json::Value = serde_json::from_str(line.trim())
-                .with_context(|| format!("parse marmotd json: {}", line.trim()))?;
+            let event: serde_json::Value = match serde_json::from_str(line.trim()) {
+                Ok(v) => v,
+                Err(_) => {
+                    debug!("marmotd non-json output (startup): {}", line.trim());
+                    continue;
+                }
+            };
 
             if event.get("type").and_then(|t| t.as_str()) == Some("ready") {
                 let pubkey = event
@@ -289,8 +294,13 @@ pub async fn run_marmot_receive_loop(
             if reader.read_line(&mut line)? == 0 {
                 return Err(anyhow!("marmotd closed stdout during keypackage publish"));
             }
-            let event: serde_json::Value = serde_json::from_str(line.trim())
-                .with_context(|| format!("parse marmotd json: {}", line.trim()))?;
+            let event: serde_json::Value = match serde_json::from_str(line.trim()) {
+                Ok(v) => v,
+                Err(_) => {
+                    debug!("marmotd non-json output (keypackage): {}", line.trim());
+                    continue;
+                }
+            };
 
             let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
             if event_type == "ok"
