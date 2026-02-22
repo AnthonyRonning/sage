@@ -169,68 +169,40 @@ impl Messenger for MarmotClient {
     }
 }
 
-/// Spawn marmotd daemon and return the client, stdout reader, and child process handle.
-pub fn spawn_marmot(config: &MarmotConfig) -> Result<(MarmotClient, std::process::ChildStdout)> {
-    let mut cmd = Command::new(&config.binary_path);
-    cmd.arg("daemon");
-
-    for relay in &config.relays {
-        cmd.arg("--relay").arg(relay);
-    }
-
-    cmd.arg("--state-dir").arg(&config.state_dir);
-
+/// Create a MarmotClient without spawning marmotd. The supervisor loop
+/// (`run_marmot_receive_loop`) handles spawning and respawning the daemon.
+/// Validates config (pubkey format) eagerly so startup fails fast on bad config.
+pub fn new_marmot_client(config: &MarmotConfig) -> Result<MarmotClient> {
+    // Validate pubkeys eagerly
     let is_wildcard = config.allowed_pubkeys.iter().any(|p| p == "*");
     if !is_wildcard {
         for pk in &config.allowed_pubkeys {
-            let hex_pk = normalize_pubkey(pk)
+            normalize_pubkey(pk)
                 .with_context(|| format!("invalid MARMOT_ALLOWED_PUBKEYS entry: {}", pk))?;
-            cmd.arg("--allow-pubkey").arg(&hex_pk);
         }
     }
 
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    info!(
-        "Spawning marmotd: {} daemon --relay {} --state-dir {}",
-        config.binary_path,
-        config.relays.join(","),
-        config.state_dir
-    );
-
-    let mut child = cmd.spawn().context("Failed to spawn marmotd")?;
-
-    let stdin = child.stdin.take().context("Failed to get marmotd stdin")?;
-    let stdout = child
-        .stdout
+    // Placeholder process -- the supervisor replaces writer and child on first spawn.
+    // Using `cat` which blocks on stdin and exits cleanly when stdin closes.
+    let mut placeholder = Command::new("cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("Failed to spawn placeholder process")?;
+    let stdin = placeholder
+        .stdin
         .take()
-        .context("Failed to get marmotd stdout")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("Failed to get marmotd stderr")?;
-
-    // Forward stderr to tracing
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            info!(target: "marmotd", "{}", line);
-        }
-    });
+        .context("Failed to get placeholder stdin")?;
 
     let writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
-
     let group_routes = Arc::new(Mutex::new(HashMap::new()));
-    let client = MarmotClient {
+
+    Ok(MarmotClient {
         writer: writer.clone(),
         request_id: AtomicU64::new(1),
         group_routes,
-        child: Arc::new(Mutex::new(child)),
-    };
-
-    Ok((client, stdout))
+        child: Arc::new(Mutex::new(placeholder)),
+    })
 }
 
 /// Single iteration of the marmot receive loop: spawn marmotd, run through
