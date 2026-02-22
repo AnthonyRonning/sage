@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
             info!("  Relays: {:?}", marmot_config.relays);
             info!("  State dir: {}", marmot_config.state_dir);
 
-            let (client, stdout, _child) = marmot::spawn_marmot(&marmot_config)?;
+            let (client, stdout) = marmot::spawn_marmot(&marmot_config)?;
             let writer = marmot::writer_handle(&client);
             let group_routes = marmot::group_routes_handle(&client);
             let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(client));

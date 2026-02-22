@@ -82,6 +82,16 @@ pub struct MarmotClient {
     /// to route per-group (each group ID = separate agent thread) while still
     /// sharing a parent identity for cross-thread memory.
     group_routes: Arc<Mutex<HashMap<String, String>>>,
+    child: Mutex<Child>,
+}
+
+impl Drop for MarmotClient {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 impl MarmotClient {
@@ -159,9 +169,7 @@ impl Messenger for MarmotClient {
 }
 
 /// Spawn marmotd daemon and return the client, stdout reader, and child process handle.
-pub fn spawn_marmot(
-    config: &MarmotConfig,
-) -> Result<(MarmotClient, std::process::ChildStdout, Child)> {
+pub fn spawn_marmot(config: &MarmotConfig) -> Result<(MarmotClient, std::process::ChildStdout)> {
     let mut cmd = Command::new(&config.binary_path);
     cmd.arg("daemon");
 
@@ -218,9 +226,10 @@ pub fn spawn_marmot(
         writer: writer.clone(),
         request_id: AtomicU64::new(1),
         group_routes,
+        child: Mutex::new(child),
     };
 
-    Ok((client, stdout, child))
+    Ok((client, stdout))
 }
 
 /// Run the marmot receive loop: waits for daemon ready, publishes keypackage,
