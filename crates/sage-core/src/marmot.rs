@@ -420,6 +420,7 @@ pub async fn run_marmot_receive_loop(
                                 attachments: vec![],
                                 timestamp: created_at,
                                 reply_to: from_pubkey.to_string(),
+                                reply_context: Some(group_id.to_string()),
                             };
 
                             if tx.blocking_send(msg).is_err() {

@@ -128,6 +128,7 @@ diesel::table! {
         context_type -> Varchar,
         display_name -> Nullable<Text>,
         created_at -> Timestamptz,
+        reply_context -> Nullable<Text>,
     }
 }
 

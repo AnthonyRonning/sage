@@ -438,6 +438,7 @@ pub fn parse_incoming_message(line: &str) -> Option<IncomingMessage> {
         message: message.to_string(),
         attachments,
         timestamp,
+        reply_context: None,
     })
 }
 

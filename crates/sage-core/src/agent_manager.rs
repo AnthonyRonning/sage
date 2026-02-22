@@ -34,6 +34,7 @@ pub struct ChatContext {
     pub context_type: String,
     pub display_name: Option<String>,
     pub created_at: chrono::DateTime<Utc>,
+    pub reply_context: Option<String>,
 }
 
 /// New chat context for insertion
@@ -217,6 +218,7 @@ impl AgentManager {
             context_type: context_type.as_str().to_string(),
             display_name: display_name.map(|s| s.to_string()),
             created_at: Utc::now(),
+            reply_context: None,
         })
     }
 
@@ -320,6 +322,43 @@ impl AgentManager {
             .optional()?;
 
         Ok(result)
+    }
+
+    /// Update the reply_context for a given identifier (e.g. Marmot group_id for a pubkey)
+    pub fn update_reply_context(&self, signal_identifier: &str, reply_ctx: &str) -> Result<()> {
+        let mut conn = self
+            .db_conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Failed to acquire database lock"))?;
+
+        diesel::update(
+            chat_contexts::table.filter(chat_contexts::signal_identifier.eq(signal_identifier)),
+        )
+        .set(chat_contexts::reply_context.eq(Some(reply_ctx)))
+        .execute(&mut *conn)?;
+
+        Ok(())
+    }
+
+    /// Load all reply_context mappings (identifier -> reply_context) for route restoration
+    pub fn load_reply_contexts(&self) -> Result<Vec<(String, String)>> {
+        let mut conn = self
+            .db_conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Failed to acquire database lock"))?;
+
+        let results: Vec<(String, Option<String>)> = chat_contexts::table
+            .select((
+                chat_contexts::signal_identifier,
+                chat_contexts::reply_context,
+            ))
+            .filter(chat_contexts::reply_context.is_not_null())
+            .load(&mut *conn)?;
+
+        Ok(results
+            .into_iter()
+            .filter_map(|(id, ctx)| ctx.map(|c| (id, c)))
+            .collect())
     }
 
     /// Get all chat contexts

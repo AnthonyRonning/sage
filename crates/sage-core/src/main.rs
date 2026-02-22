@@ -208,6 +208,22 @@ async fn main() -> Result<()> {
             let (client, stdout) = marmot::spawn_marmot(&marmot_config)?;
             let writer = marmot::writer_handle(&client);
             let group_routes = marmot::group_routes_handle(&client);
+
+            // Restore persisted pubkey -> group_id routes from DB
+            match agent_manager.load_reply_contexts() {
+                Ok(routes) => {
+                    if !routes.is_empty() {
+                        info!("Restored {} Marmot route(s) from database", routes.len());
+                        if let Ok(mut map) = group_routes.lock() {
+                            for (pubkey, group_id) in routes {
+                                map.insert(pubkey, group_id);
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to load reply contexts: {}", e),
+            }
+
             let messenger: Arc<Mutex<dyn Messenger>> = Arc::new(Mutex::new(client));
 
             let receive_handle = tokio::spawn(async move {
@@ -342,6 +358,13 @@ async fn main() -> Result<()> {
                 };
 
                 info!("Using agent {} for user {}", agent_id, user_name);
+
+                // Persist reply context (e.g. Marmot group_id) for route restoration after restart
+                if let Some(ref ctx) = msg.reply_context {
+                    if let Err(e) = agent_manager.update_reply_context(&msg.reply_to, ctx) {
+                        warn!("Failed to persist reply context: {}", e);
+                    }
+                }
 
                 // Send typing indicator early
                 {

@@ -21,6 +21,9 @@ pub struct IncomingMessage {
     pub timestamp: u64,
     /// Identity key for agent lookup and reply routing (Signal UUID or Marmot pubkey)
     pub reply_to: String,
+    /// Transport-specific routing context to persist (e.g. Marmot nostr_group_id).
+    /// Used to restore reply routing after restarts.
+    pub reply_context: Option<String>,
 }
 
 /// Trait for sending messages via a messaging provider
