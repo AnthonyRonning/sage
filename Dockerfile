@@ -40,7 +40,14 @@ COPY crates/ crates/
 
 RUN cargo build --release
 
-# Stage 4: Runtime
+# Stage 4: Build marmotd (optional MLS messaging sidecar)
+FROM chef AS marmotd-builder
+ARG MARMOTD_VERSION=0.5.1
+RUN git clone --depth 1 --branch marmotd-v${MARMOTD_VERSION} https://github.com/sledtools/pika.git /marmotd-src
+WORKDIR /marmotd-src
+RUN cargo build -p marmotd --release
+
+# Stage 5: Runtime
 FROM docker.io/debian:bookworm-slim
 
 # Install runtime dependencies and comprehensive CLI toolset
@@ -140,6 +147,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     toml \
     rich
 
+# Copy marmotd binary (MLS messaging sidecar, built from pika source)
+COPY --from=marmotd-builder /marmotd-src/target/release/marmotd /usr/local/bin/marmotd
+
 # Create non-root user
 RUN useradd -m -u 1000 sage
 
@@ -151,8 +161,8 @@ COPY --from=builder /app/target/release/sage /app/sage
 # Copy migrations for diesel
 COPY --from=builder /app/crates/sage-core/migrations /app/migrations
 
-# Create workspace directory
-RUN mkdir -p /workspace && chown sage:sage /workspace
+# Create workspace and marmot state directories
+RUN mkdir -p /workspace /data/marmot-state && chown sage:sage /workspace /data/marmot-state
 
 # Run as non-root user
 USER sage

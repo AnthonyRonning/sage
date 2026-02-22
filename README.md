@@ -9,7 +9,7 @@
 Sage is an AI assistant that prioritizes **privacy** and **data sovereignty**. It's designed to be a trusted companion that remembers your conversations, learns about you over time, and can take actions on your behalf - all while keeping your data under your control.
 
 **Key Features:**
-- **End-to-end encrypted messaging** via Signal
+- **End-to-end encrypted messaging** via Signal or [Pika](https://github.com/sledtools/pika) (MLS over Nostr)
 - **Image understanding** - send photos and Sage can see and describe them
 - **Long-term memory** that persists across conversations
 - **Confidential compute** - LLM inference runs in a TEE (Trusted Execution Environment)
@@ -22,7 +22,7 @@ Most AI assistants are stateless - they forget everything after each conversatio
 
 - Your conversations stay on **your** PostgreSQL instance
 - LLM inference happens in **confidential compute** (Maple/TEE) - the inference provider can't see your prompts
-- Communication happens over **Signal's E2E encryption**
+- Communication happens over **Signal's E2E encryption** or **MLS-encrypted Nostr** via [Pika](https://github.com/sledtools/pika)
 - The agent runs in **your container** on your infrastructure
 
 ## Technical Highlights
@@ -250,7 +250,7 @@ DSRs parses this back into a typed `AgentResponse` struct that Sage uses to exec
 | LLM | **Kimi K2** (thinking variant) | Strong tool use, 128k context |
 | Inference | **Maple** | TEE-based confidential compute |
 | Embeddings | **nomic-embed-text** | Via Maple |
-| Messaging | **Signal** (signal-cli) | E2E encrypted, works on mobile |
+| Messaging | **Signal** (signal-cli) or **Pika** (marmotd) | E2E encrypted; Signal for mobile, Pika for decentralized Nostr |
 | Database | **PostgreSQL + pgvector** | Structured data + vector search |
 | Framework | **DSRs** (dspy-rs) | Typed signatures, BAML parsing |
 
@@ -266,12 +266,41 @@ DSRs parses this back into a typed `AgentResponse` struct that Sage uses to exec
 | `schedule_task` | Reminders (cron or one-off) |
 | `set_preference` | User preferences (timezone, etc.) |
 
+## Messaging Providers
+
+Sage supports two messaging backends. Set the `MESSENGER` environment variable to choose (`signal` is the default).
+
+### Signal (Default)
+
+Uses [signal-cli](https://github.com/AsamK/signal-cli) for E2E encrypted messaging over the Signal protocol. Requires a registered phone number and runs signal-cli as a sidecar container.
+
+```bash
+MESSENGER=signal
+SIGNAL_PHONE_NUMBER=+1234567890
+SIGNAL_ALLOWED_USERS=*  # Or comma-separated Signal UUIDs
+```
+
+### Marmot / Pika (Decentralized)
+
+Uses [marmotd](https://github.com/sledtools/pika) for MLS-encrypted messaging over Nostr relays. No phone number required — identity is a Nostr keypair. Message Sage from the [Pika](https://github.com/sledtools/pika) app.
+
+```bash
+MESSENGER=marmot
+MARMOT_RELAYS=wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net
+MARMOT_ALLOWED_PUBKEYS=npub1...  # Or * for all
+MARMOT_AUTO_ACCEPT_WELCOMES=true
+```
+
+On first startup, marmotd generates a Nostr keypair and prints its `npub` in the logs. Use this npub to start a conversation from Pika. The keypair and MLS state persist in a Docker volume (`sage-marmot-state`).
+
+marmotd is built from source during `docker build` (included in the Dockerfile).
+
 ## Quick Start
 
 ### Prerequisites
 
 - [Podman](https://podman.io/) or Docker
-- signal-cli registered with a phone number
+- signal-cli registered with a phone number (if using Signal) or [Pika](https://github.com/sledtools/pika) app (if using Marmot)
 - Maple API access (or compatible OpenAI endpoint)
 
 ### Option 1: Docker (Recommended)
@@ -336,12 +365,22 @@ just start        # Start all services
 MAPLE_API_URL=https://your-maple-endpoint
 MAPLE_API_KEY=your-api-key
 MAPLE_MODEL=maple/kimi-k2-5
+
+# Messenger (choose one)
+MESSENGER=signal                      # "signal" (default) or "marmot"
+
+# Signal config (when MESSENGER=signal)
 SIGNAL_PHONE_NUMBER=+1234567890
+SIGNAL_ALLOWED_USERS=*                # Or comma-separated UUIDs
+
+# Marmot config (when MESSENGER=marmot)
+MARMOT_RELAYS=wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net
+MARMOT_ALLOWED_PUBKEYS=npub1...       # Or * for all
+MARMOT_AUTO_ACCEPT_WELCOMES=true
 
 # Optional
 BRAVE_API_KEY=your-brave-key          # For web search
 MAPLE_VISION_MODEL=maple/kimi-k2-5   # For image understanding (defaults to MAPLE_MODEL)
-SIGNAL_ALLOWED_USERS=*                # Or comma-separated UUIDs
 ```
 
 ## Architecture
@@ -359,6 +398,11 @@ SIGNAL_ALLOWED_USERS=*                # Or comma-separated UUIDs
 │  │   Manager   │  │   System    │  │            │  │
 │  └─────────────┘  └─────────────┘  └────────────┘  │
 └─────────────────────────┬───────────────────────────┘
+                                             ▲
+                                             │ JSONL/stdio
+┌─────────────────┐   MLS/Nostr     ┌────────┴────────┐
+│   Pika App      │◄──────────────►│    marmotd      │
+└─────────────────┘    (encrypted)  └─────────────────┘
                           │
         ┌─────────────────┼─────────────────┐
         ▼                 ▼                 ▼
@@ -372,7 +416,7 @@ SIGNAL_ALLOWED_USERS=*                # Or comma-separated UUIDs
 
 | Layer | Protection |
 |-------|------------|
-| **Transport** | Signal E2E encryption |
+| **Transport** | Signal E2E encryption or MLS-encrypted Nostr (via Pika) |
 | **Inference** | Maple TEE (confidential compute) |
 | **Embeddings** | Maple TEE (memory vectors generated privately) |
 | **Storage** | Local PostgreSQL (your machine) |
@@ -444,6 +488,7 @@ Current categories: first-time users, casual chat, web search, memory storage, t
 - [Letta](https://github.com/letta-ai/letta) - Memory management inspiration
 - [DSRs](https://github.com/krypticmouse/DSRs) - DSPy in Rust
 - [signal-cli](https://github.com/AsamK/signal-cli) - Signal CLI interface
+- [Pika](https://github.com/sledtools/pika) - MLS-encrypted messaging over Nostr
 - [Maple](https://www.trymaple.ai/) - Confidential compute LLM inference
 
 ## License

@@ -14,7 +14,7 @@ default:
 build:
     podman build -f Dockerfile -t sage:latest .
 
-# Start all containers (postgres, signal-cli, sage)
+# Start all containers (postgres + messenger + sage)
 start:
     #!/usr/bin/env bash
     set -e
@@ -22,7 +22,8 @@ start:
     source .env
     set +a
     
-    echo "Starting Sage stack..."
+    MESSENGER="${MESSENGER:-signal}"
+    echo "Starting Sage stack (messenger: $MESSENGER)..."
     
     # Start PostgreSQL if not running
     if ! podman ps --format '{{{{.Names}}}}' | grep -q '^sage-postgres$'; then
@@ -36,22 +37,49 @@ start:
         echo "PostgreSQL already running"
     fi
     
-    # Start signal-cli if not running
-    if ! podman ps --format '{{{{.Names}}}}' | grep -q '^sage-signal-cli$'; then
-        echo "Starting signal-cli..."
-        podman run -d --name sage-signal-cli \
-            -p 7583:7583 -v signal-cli-data:/var/lib/signal-cli --tmpfs /tmp:exec \
-            registry.gitlab.com/packaging/signal-cli/signal-cli-jre:latest \
-            daemon --tcp 0.0.0.0:7583 --send-read-receipts --ignore-stories
-        sleep 2
-    else
-        echo "signal-cli already running"
-    fi
+    # Messenger-specific setup
+    MESSENGER_VOLUMES=""
+    MESSENGER_ENV=""
     
-    # Ensure signal-cli attachments are readable by sage
-    podman run --rm -v signal-cli-data:/signal-cli-data \
-        docker.io/alpine:latest \
-        sh -c "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"
+    if [ "$MESSENGER" = "signal" ]; then
+        # Start signal-cli if not running
+        if ! podman ps --format '{{{{.Names}}}}' | grep -q '^sage-signal-cli$'; then
+            echo "Starting signal-cli..."
+            podman run -d --name sage-signal-cli \
+                -p 7583:7583 -v signal-cli-data:/var/lib/signal-cli --tmpfs /tmp:exec \
+                registry.gitlab.com/packaging/signal-cli/signal-cli-jre:latest \
+                daemon --tcp 0.0.0.0:7583 --send-read-receipts --ignore-stories
+            sleep 2
+        else
+            echo "signal-cli already running"
+        fi
+        
+        # Ensure signal-cli attachments are readable by sage
+        podman run --rm -v signal-cli-data:/signal-cli-data \
+            docker.io/alpine:latest \
+            sh -c "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"
+        
+        MESSENGER_VOLUMES="-v signal-cli-data:/signal-cli-data:ro"
+        MESSENGER_ENV="\
+            -e MESSENGER=signal \
+            -e SIGNAL_CLI_HOST=localhost -e SIGNAL_CLI_PORT=7583 \
+            -e SIGNAL_PHONE_NUMBER=$SIGNAL_PHONE_NUMBER \
+            -e SIGNAL_ALLOWED_USERS=$SIGNAL_ALLOWED_USERS"
+    elif [ "$MESSENGER" = "marmot" ]; then
+        echo "Using Marmot (MLS over Nostr) - no signal-cli needed"
+        podman volume create sage-marmot-state 2>/dev/null || true
+        
+        MESSENGER_VOLUMES="-v sage-marmot-state:/data/marmot-state:U,z"
+        MESSENGER_ENV="\
+            -e MESSENGER=marmot \
+            -e MARMOT_RELAYS=${MARMOT_RELAYS:-} \
+            -e MARMOT_STATE_DIR=/data/marmot-state \
+            -e MARMOT_ALLOWED_PUBKEYS=${MARMOT_ALLOWED_PUBKEYS:-} \
+            -e MARMOT_AUTO_ACCEPT_WELCOMES=${MARMOT_AUTO_ACCEPT_WELCOMES:-true}"
+    else
+        echo "Unknown MESSENGER=$MESSENGER (expected 'signal' or 'marmot')"
+        exit 1
+    fi
     
     # Create workspace directory if it doesn't exist
     mkdir -p ~/.sage/workspace
@@ -59,27 +87,31 @@ start:
     # Remove old sage container and start fresh
     podman rm -f sage 2>/dev/null || true
     echo "Starting Sage..."
-    podman run -d --name sage --network host \
+    eval podman run -d --name sage --network host \
         -v ~/.sage/workspace:/workspace:U,z \
-        -v signal-cli-data:/signal-cli-data:ro \
+        $MESSENGER_VOLUMES \
         -e DATABASE_URL=postgres://sage:sage@localhost:5434/sage \
         -e MAPLE_API_URL="$MAPLE_API_URL" \
         -e MAPLE_API_KEY="$MAPLE_API_KEY" \
         -e MAPLE_MODEL="$MAPLE_MODEL" \
         -e MAPLE_EMBEDDING_MODEL="$MAPLE_EMBEDDING_MODEL" \
-        -e SIGNAL_CLI_HOST=localhost -e SIGNAL_CLI_PORT=7583 \
-        -e SIGNAL_PHONE_NUMBER="$SIGNAL_PHONE_NUMBER" \
-        -e SIGNAL_ALLOWED_USERS="$SIGNAL_ALLOWED_USERS" \
+        $MESSENGER_ENV \
         -e BRAVE_API_KEY="$BRAVE_API_KEY" \
         -e SAGE_WORKSPACE=/workspace \
+        -e HEALTH_PORT="${HEALTH_PORT:-8080}" \
         -e RUST_LOG=info \
         sage:latest
     
     sleep 2
     echo ""
-    echo "🌿 Sage stack started!"
-    echo "   - PostgreSQL: localhost:5434 (data: sage-pgdata volume)"
-    echo "   - signal-cli: localhost:7583 (data: signal-cli-data volume)"
+    echo "Sage stack started! (messenger: $MESSENGER)"
+    if [ "$MESSENGER" = "signal" ]; then
+        echo "   - PostgreSQL: localhost:5434 (data: sage-pgdata volume)"
+        echo "   - signal-cli: localhost:7583 (data: signal-cli-data volume)"
+    else
+        echo "   - PostgreSQL: localhost:5434 (data: sage-pgdata volume)"
+        echo "   - Marmot state: sage-marmot-state volume"
+    fi
     echo "   - Sage: running"
     echo "   - Workspace: ~/.sage/workspace"
     echo ""
@@ -93,38 +125,60 @@ stop:
     podman rm -f sage 2>/dev/null || true
     podman rm -f sage-signal-cli 2>/dev/null || true
     podman rm -f sage-postgres 2>/dev/null || true
-    echo "Containers stopped. Data preserved in volumes (sage-pgdata, signal-cli-data)."
+    echo "Containers stopped. Data preserved in volumes (sage-pgdata, signal-cli-data, sage-marmot-state)."
 
-# Restart Sage only (keeps postgres and signal-cli running)
+# Restart Sage only (keeps postgres running)
 restart:
     #!/usr/bin/env bash
     set -a
     source .env
     set +a
     
-    # Ensure signal-cli attachments are readable by sage
-    podman run --rm -v signal-cli-data:/signal-cli-data \
-        docker.io/alpine:latest \
-        sh -c "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"
+    MESSENGER="${MESSENGER:-signal}"
+    
+    MESSENGER_VOLUMES=""
+    MESSENGER_ENV=""
+    
+    if [ "$MESSENGER" = "signal" ]; then
+        podman run --rm -v signal-cli-data:/signal-cli-data \
+            docker.io/alpine:latest \
+            sh -c "chmod o+rX /signal-cli-data/.local/share/signal-cli/attachments 2>/dev/null || true"
+        
+        MESSENGER_VOLUMES="-v signal-cli-data:/signal-cli-data:ro"
+        MESSENGER_ENV="\
+            -e MESSENGER=signal \
+            -e SIGNAL_CLI_HOST=localhost -e SIGNAL_CLI_PORT=7583 \
+            -e SIGNAL_PHONE_NUMBER=$SIGNAL_PHONE_NUMBER \
+            -e SIGNAL_ALLOWED_USERS=$SIGNAL_ALLOWED_USERS"
+    elif [ "$MESSENGER" = "marmot" ]; then
+        podman volume create sage-marmot-state 2>/dev/null || true
+        
+        MESSENGER_VOLUMES="-v sage-marmot-state:/data/marmot-state:U,z"
+        MESSENGER_ENV="\
+            -e MESSENGER=marmot \
+            -e MARMOT_RELAYS=${MARMOT_RELAYS:-} \
+            -e MARMOT_STATE_DIR=/data/marmot-state \
+            -e MARMOT_ALLOWED_PUBKEYS=${MARMOT_ALLOWED_PUBKEYS:-} \
+            -e MARMOT_AUTO_ACCEPT_WELCOMES=${MARMOT_AUTO_ACCEPT_WELCOMES:-true}"
+    fi
     
     mkdir -p ~/.sage/workspace
     podman rm -f sage 2>/dev/null || true
-    podman run -d --name sage --network host \
+    eval podman run -d --name sage --network host \
         -v ~/.sage/workspace:/workspace:U,z \
-        -v signal-cli-data:/signal-cli-data:ro \
+        $MESSENGER_VOLUMES \
         -e DATABASE_URL=postgres://sage:sage@localhost:5434/sage \
         -e MAPLE_API_URL="$MAPLE_API_URL" \
         -e MAPLE_API_KEY="$MAPLE_API_KEY" \
         -e MAPLE_MODEL="$MAPLE_MODEL" \
         -e MAPLE_EMBEDDING_MODEL="$MAPLE_EMBEDDING_MODEL" \
-        -e SIGNAL_CLI_HOST=localhost -e SIGNAL_CLI_PORT=7583 \
-        -e SIGNAL_PHONE_NUMBER="$SIGNAL_PHONE_NUMBER" \
-        -e SIGNAL_ALLOWED_USERS="$SIGNAL_ALLOWED_USERS" \
+        $MESSENGER_ENV \
         -e BRAVE_API_KEY="$BRAVE_API_KEY" \
         -e SAGE_WORKSPACE=/workspace \
+        -e HEALTH_PORT="${HEALTH_PORT:-8080}" \
         -e RUST_LOG=info \
         sage:latest
-    echo "Sage restarted"
+    echo "Sage restarted (messenger: $MESSENGER)"
 
 # View Sage logs
 logs:
@@ -207,7 +261,7 @@ lint:
 
 # List all Sage-related volumes
 volumes:
-    podman volume ls | grep -E "sage|signal"
+    podman volume ls | grep -E "sage|signal|marmot"
 
 # DANGER: Delete all data and start fresh
 nuke:
@@ -215,11 +269,12 @@ nuke:
     echo "⚠️  This will DELETE ALL SAGE DATA including:"
     echo "   - PostgreSQL database (memory, conversations, archival)"
     echo "   - signal-cli registration"
+    echo "   - Marmot state (MLS keys, identity)"
     echo ""
     read -p "Type 'DELETE' to confirm: " confirm
     if [ "$confirm" = "DELETE" ]; then
         just stop
-        podman volume rm -f sage-pgdata signal-cli-data 2>/dev/null || true
+        podman volume rm -f sage-pgdata signal-cli-data sage-marmot-state 2>/dev/null || true
         echo "All data deleted."
     else
         echo "Aborted."
